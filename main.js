@@ -6,6 +6,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
+import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CSG } from 'three-csg-ts';
 
 // ─────────────────────────────────────────────────────────────
@@ -98,9 +100,9 @@ function initThree() {
   fill.position.set(-80, -30, -60);
   scene.add(fill);
 
-  // 補助グリッドと軸(モデリングの基準)
-  const grid = new THREE.GridHelper(200, 20, 0x334, 0x223);
-  grid.material.opacity = 0.4;
+  // 補助グリッドと軸(モデリングの基準)。グレー背景でも視認できる明るさにする。
+  const grid = new THREE.GridHelper(200, 20, 0x8890a0, 0x4a4f5c);
+  grid.material.opacity = 0.6;
   grid.material.transparent = true;
   scene.add(grid);
   scene.add(new THREE.AxesHelper(30));
@@ -200,7 +202,7 @@ function updateBadges() {
 
   if (targetMesh) {
     const s = meshSize(targetMesh);
-    modeBadge.textContent = 'モード: STL 編集';
+    modeBadge.textContent = 'モード: モデル編集';
     meshBadge.textContent =
       `メッシュ: ${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)} mm`;
     viewport.classList.add('has-mesh');
@@ -234,26 +236,70 @@ function initDragAndDrop() {
     e.preventDefault();
     viewport.classList.remove('dragover');
     const file = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (file) loadStlFile(file);
+    if (file) loadModelFile(file);
   });
 }
 
-/** File(STL) を読み込んで対象メッシュにする */
-function loadStlFile(file) {
+/** File(STL/3MF) を読み込んで対象メッシュにする。拡張子で処理を分岐する。 */
+function loadModelFile(file) {
+  const name = file.name.toLowerCase();
+  const isStl = name.endsWith('.stl');
+  const is3mf = name.endsWith('.3mf');
+  if (!isStl && !is3mf) {
+    showError(new Error('対応形式は STL / 3MF のみです: ' + file.name), '未対応のファイル形式');
+    return;
+  }
+
   const reader = new FileReader();
   reader.onload = (e) => {
     try {
-      const geometry = new STLLoader().parse(e.target.result);
-      geometry.center();                       // 原点中心へ寄せる
+      let geometry;
+      if (isStl) {
+        geometry = new STLLoader().parse(e.target.result);
+        geometry.center();                     // 原点中心へ寄せる
+      } else {
+        geometry = parse3mfGeometry(e.target.result);
+      }
       const mesh = new THREE.Mesh(geometry, defaultMaterial());
       setTargetMesh(mesh);
-      logChat('sys', `STL を読み込みました: ${file.name}`);
+      logChat('sys', `${isStl ? 'STL' : '3MF'} を読み込みました: ${file.name}`);
     } catch (err) {
-      showError(err, 'STL の読み込みに失敗しました');
+      showError(err, 'モデルの読み込みに失敗しました');
     }
   };
   reader.onerror = () => showError(reader.error, 'ファイル読み込みエラー');
   reader.readAsArrayBuffer(file);
+}
+
+/**
+ * 3MF バイナリを解析し、色・マテリアル情報を無視して形状だけを 1 つの
+ * ジオメトリに統合する(要件により色情報は不要なため position のみ採用)。
+ * @param {ArrayBuffer} buffer
+ * @returns {THREE.BufferGeometry}
+ */
+function parse3mfGeometry(buffer) {
+  const group = new ThreeMFLoader().parse(buffer);
+  group.updateMatrixWorld(true);
+
+  const geometries = [];
+  group.traverse((child) => {
+    if (!child.isMesh || !child.geometry) return;
+    const pos = child.geometry.getAttribute('position');
+    if (!pos) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', pos.clone());
+    if (child.geometry.index) g.setIndex(child.geometry.index.clone());
+    g.applyMatrix4(child.matrixWorld);          // 3MF の配置変換を形状へ焼き込む
+    geometries.push(g);
+  });
+
+  if (geometries.length === 0) {
+    throw new Error('3MF 内にメッシュが見つかりませんでした。');
+  }
+  const merged = geometries.length === 1 ? geometries[0] : mergeGeometries(geometries, false);
+  merged.computeVertexNormals();
+  merged.center();
+  return merged;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -536,6 +582,25 @@ function initUI() {
 
   // エラーを閉じる
   document.getElementById('btn-error-close').addEventListener('click', clearError);
+
+  // 目的・機能仕様の info パネル開閉
+  const infoBtn = document.getElementById('btn-info');
+  const infoPanel = document.getElementById('info-panel');
+  const setInfoOpen = (open) => {
+    infoPanel.classList.toggle('hidden', !open);
+    infoBtn.setAttribute('aria-expanded', String(open));
+  };
+  infoBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setInfoOpen(infoPanel.classList.contains('hidden'));
+  });
+  document.getElementById('btn-info-close').addEventListener('click', () => setInfoOpen(false));
+  document.addEventListener('click', (e) => {
+    if (!infoPanel.classList.contains('hidden') &&
+      !infoPanel.contains(e.target) && e.target !== infoBtn) {
+      setInfoOpen(false);
+    }
+  });
 
   // 設定タブ
   const apiKey = document.getElementById('api-key');

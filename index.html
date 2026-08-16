@@ -32,13 +32,38 @@
       <div id="drop-hint">
         <div class="drop-hint-inner">
           <div class="drop-icon">⬇</div>
-          <p>STL ファイルをここにドラッグ＆ドロップ</p>
+          <p>STL / 3MF ファイルをここにドラッグ＆ドロップ</p>
           <p class="drop-sub">または右パネルの指示だけでゼロから生成できます</p>
         </div>
       </div>
-      <div id="viewport-badges">
-        <span id="mode-badge" class="vp-badge">モード: —</span>
-        <span id="mesh-badge" class="vp-badge">メッシュ: なし</span>
+
+      <!-- 左上: アプリタイトル + 補足説明、その下にモード/メッシュ状態バッジ -->
+      <div id="viewport-topleft">
+        <div id="app-title">
+          <span class="app-title-main">Chat 3D</span>
+          <span class="app-title-sub">テキスト指示・コード実行で作る 3D モデル(STL/3MF)ツール</span>
+        </div>
+        <div id="viewport-badges">
+          <span id="mode-badge" class="vp-badge">モード: —</span>
+          <span id="mesh-badge" class="vp-badge">メッシュ: なし</span>
+        </div>
+      </div>
+
+      <!-- 右上: 目的・機能仕様を説明する info ボタン(タイトルの反対側) -->
+      <button id="btn-info" class="info-btn" type="button"
+        title="このツールについて" aria-haspopup="true" aria-expanded="false">i</button>
+      <div id="info-panel" class="hidden" role="dialog" aria-label="Chat 3D について">
+        <div class="info-head">
+          <span>Chat 3D について</span>
+          <button id="btn-info-close" class="btn-x" type="button" title="閉じる">×</button>
+        </div>
+        <p>ブラウザだけで完結する、テキスト指示 / コード実行による 3D モデル(STL)生成・編集ツールの PoC です。バックエンドは持ちません。</p>
+        <ul>
+          <li><b>STL 編集</b> — STL/3MF を D&amp;D 読み込みし、チャット指示で CSG 加工(穴あけ・結合など)。</li>
+          <li><b>ゼロベース生成</b> — 何も読み込まずチャット指示だけで基本図形 + CSG から生成。</li>
+          <li><b>コード直接入力</b> — 外部 LLM で作った JavaScript を貼り付けて実行(Gemini 不使用)。</li>
+        </ul>
+        <p class="info-note">⚠ 入力されたコードは <code>new Function</code> でそのまま実行されます。信頼できないコードは実行しないでください。</p>
       </div>
     </section>
 
@@ -163,7 +188,7 @@
       sitesJsonPath: 'config/subutomo-sites.json',
       logoPath: './common/assets/logo.png',
       theme: 'dark-bg',
-      version: '0.1.0',
+      version: '0.2.0',
       privacy: { localStorage: true, analytics: false },
       onSecretAction: null
     };

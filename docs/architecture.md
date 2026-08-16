@@ -6,9 +6,9 @@ Chat 3D は「UI 骨格(index.html)」「中核ロジック(main.js)」「テー
 ## 処理フロー
 
 ```
-                ┌─────────────────────────────┐
-  STL D&D  ──►  │  loadStlFile → setTargetMesh │
-                └─────────────┬───────────────┘
+                ┌───────────────────────────────┐
+  STL/3MF D&D ► │  loadModelFile → setTargetMesh │
+                └─────────────┬─────────────────┘
                               ▼
   チャット指示 ─► callGemini(system+context) ─► extractCode ─┐
                                                              ▼
@@ -31,6 +31,15 @@ Chat 3D は「UI 骨格(index.html)」「中核ロジック(main.js)」「テー
 - `runUserCode(code)` — `new Function('scene','THREE','CSG','targetMesh','setResult', code)` で実行。
   - `setResult(mesh)` 優先、無ければ `return` 値をメッシュとして採用。
   - 例外は `showError()` で UI にスタックトレースを表示（握りつぶさない）。
+
+## 3MF 読み込み
+- `ThreeMFLoader.parse(buffer)` はシーンに追加していない `THREE.Group` を同期的に返す。
+- `group.updateMatrixWorld(true)` を呼んでから各 `Mesh` を走査し、`position` 属性(と
+  `index`)だけを取り出して `matrixWorld` を焼き込む。色・マテリアルは要件により不要
+  なため意図的に破棄する。
+- 複数メッシュがあれば `BufferGeometryUtils.mergeGeometries` で 1 つに統合し、
+  `computeVertexNormals()` で法線を再計算してから `center()` する(STL 読み込みと
+  同じ「原点中心に寄せる」挙動に揃えるため)。
 
 ## Gemini 連携
 - エンドポイント: `POST /v1beta/models/{model}:generateContent?key=...`
