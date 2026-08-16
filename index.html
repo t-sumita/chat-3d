@@ -72,6 +72,7 @@
         <ul>
           <li><b>STL 編集</b> — STL/3MF を Drag&amp;Drop で読み込み、チャット指示で CSG 加工(穴あけ・結合など)。</li>
           <li><b>ゼロベース生成</b> — 何も読み込まずチャット指示だけで基本図形 + CSG から生成。</li>
+          <li><b>編集</b> — チャットを使わず、拡大縮小・消しゴム・パーツ分割・図形/文字の追加をマウスと数値で直接操作。</li>
           <li><b>コード直接入力</b> — 外部 LLM で作った JavaScript を貼り付けて実行。</li>
         </ul>
 
@@ -95,8 +96,12 @@
       <header id="panel-head">
         <h1>Chat 3D</h1>
         <div id="head-actions">
+          <button id="btn-undo" class="btn btn-ghost btn-icon" type="button"
+            title="元に戻す (Ctrl+Z)" disabled>↶</button>
+          <button id="btn-redo" class="btn btn-ghost btn-icon" type="button"
+            title="やり直す (Ctrl+Y)" disabled>↷</button>
           <button id="btn-reset" class="btn btn-ghost" title="シーンを空にする">クリア</button>
-          <button id="btn-download" class="btn btn-primary" title="現在のメッシュを STL 保存">STL ダウンロード</button>
+          <button id="btn-download" class="btn btn-primary" title="現在のメッシュを STL 保存">STL 保存</button>
         </div>
       </header>
 
@@ -104,8 +109,10 @@
       <nav id="tabs" role="tablist">
         <button class="tab tab-active" data-tab="chat" role="tab"
           title="日本語で指示を出して、LLM にモデルを作らせる／直させるタブ">チャット</button>
+        <button class="tab" data-tab="edit" role="tab"
+          title="チャットを使わず、マウス操作と数値入力で直接編集するタブ">編集</button>
         <button class="tab" data-tab="code" role="tab"
-          title="LLM 側の JavaScript 回答を貼り付けて実行するタブ">コード直接入力</button>
+          title="LLM 側の JavaScript 回答を貼り付けて実行するタブ">コード</button>
         <button class="tab" data-tab="settings" role="tab"
           title="Gemini API キー・モデル・システムプロンプトの設定">設定</button>
       </nav>
@@ -142,6 +149,130 @@
             <button id="btn-paste-run" class="btn btn-primary" type="button">貼り付けを実行</button>
           </div>
         </div>
+      </div>
+
+      <!-- タブ: 編集(チャット不要の直接操作) -->
+      <div class="tab-panel" data-panel="edit">
+        <p class="hint">
+          チャットを使わずに直接編集します。操作はすべてヘッダの
+          <b>↶ / ↷</b>(Ctrl+Z / Ctrl+Y)で元に戻せます。
+        </p>
+        <p id="edit-size" class="edit-size">モデル未読み込み</p>
+
+        <!-- 拡大・縮小 -->
+        <details class="edit-sec" open>
+          <summary>拡大・縮小</summary>
+          <div class="edit-row">
+            <span class="edit-label">全体倍率</span>
+            <input id="scale-all" type="number" value="1" step="0.1" min="0.01" />
+            <button id="btn-scale-all" class="btn btn-ghost" type="button">適用</button>
+          </div>
+          <div class="edit-note">XYZ 個別(1 のままの軸は変わりません)</div>
+          <div class="edit-xyz">
+            <label><span>X</span><input id="scale-x" type="number" value="1" step="0.1" min="0.01" /></label>
+            <label><span>Y</span><input id="scale-y" type="number" value="1" step="0.1" min="0.01" /></label>
+            <label><span>Z</span><input id="scale-z" type="number" value="1" step="0.1" min="0.01" /></label>
+          </div>
+          <div class="row-end"><button id="btn-scale-xyz" class="btn btn-primary" type="button">XYZ を適用</button></div>
+
+          <div class="edit-note">寸法(mm)を直接指定して合わせることもできます</div>
+          <div class="edit-xyz">
+            <label><span>X</span><input id="size-x" type="number" step="1" min="0.1" /></label>
+            <label><span>Y</span><input id="size-y" type="number" step="1" min="0.1" /></label>
+            <label><span>Z</span><input id="size-z" type="number" step="1" min="0.1" /></label>
+          </div>
+          <div class="row-between">
+            <label class="edit-check">
+              <input id="size-keep-ratio" type="checkbox" checked /> <span>比率を保つ</span>
+            </label>
+            <button id="btn-size-apply" class="btn btn-primary" type="button">寸法を適用</button>
+          </div>
+        </details>
+
+        <!-- 消しゴム -->
+        <details class="edit-sec">
+          <summary>消しゴム(クリックで削る)</summary>
+          <div class="edit-note">
+            ON にしてモデルをクリックすると、その位置を球状に削ります。
+            削るたびに CSG 計算が走るため、複雑なモデルでは数秒かかります。
+          </div>
+          <div class="edit-row">
+            <button id="btn-eraser" class="btn btn-ghost" type="button">消しゴム: OFF</button>
+            <span class="edit-label">半径</span>
+            <input id="eraser-size" type="number" value="5" step="1" min="0.5" />
+            <span class="edit-unit">mm</span>
+          </div>
+        </details>
+
+        <!-- パーツ分割 -->
+        <details class="edit-sec">
+          <summary>パーツ分割・個別編集</summary>
+          <div class="edit-note">
+            つながっていない部分(板・部品など)を自動で認識して一覧にします。
+            選んだパーツだけを拡大縮小・削除できます。
+          </div>
+          <div class="row-end">
+            <button id="btn-split" class="btn btn-primary" type="button">パーツに分割して認識</button>
+          </div>
+          <div id="parts-list" class="parts-list hidden"></div>
+          <div id="parts-ops" class="hidden">
+            <div class="edit-note">選択中のパーツを、そのパーツの中心を基準に拡大縮小します</div>
+            <div class="edit-xyz">
+              <label><span>X</span><input id="part-sx" type="number" value="1" step="0.1" min="0.01" /></label>
+              <label><span>Y</span><input id="part-sy" type="number" value="1" step="0.1" min="0.01" /></label>
+              <label><span>Z</span><input id="part-sz" type="number" value="1" step="0.1" min="0.01" /></label>
+            </div>
+            <div class="row-between">
+              <button id="btn-part-delete" class="btn btn-ghost" type="button">このパーツを削除</button>
+              <button id="btn-part-scale" class="btn btn-primary" type="button">パーツに適用</button>
+            </div>
+          </div>
+        </details>
+
+        <!-- 図形・テキストの追加 -->
+        <details class="edit-sec">
+          <summary>図形・テキストを追加</summary>
+          <div class="edit-row">
+            <span class="edit-label">図形</span>
+            <select id="prim-kind">
+              <option value="box">直方体</option>
+              <option value="cylinder">円柱</option>
+              <option value="sphere">球</option>
+              <option value="cone">円錐</option>
+            </select>
+          </div>
+          <div class="edit-xyz">
+            <label><span>幅/径</span><input id="prim-w" type="number" value="20" step="1" min="0.1" /></label>
+            <label><span>高さ</span><input id="prim-h" type="number" value="20" step="1" min="0.1" /></label>
+            <label><span>奥行</span><input id="prim-d" type="number" value="20" step="1" min="0.1" /></label>
+          </div>
+          <div class="edit-note">配置する位置(mm・原点が中心)</div>
+          <div class="edit-xyz">
+            <label><span>X</span><input id="prim-x" type="number" value="0" step="1" /></label>
+            <label><span>Y</span><input id="prim-y" type="number" value="0" step="1" /></label>
+            <label><span>Z</span><input id="prim-z" type="number" value="0" step="1" /></label>
+          </div>
+          <div class="row-between">
+            <button id="btn-prim-sub" class="btn btn-ghost" type="button">この形で削る</button>
+            <button id="btn-prim-add" class="btn btn-primary" type="button">追加(結合)</button>
+          </div>
+
+          <div class="edit-note edit-sep">
+            テキスト(<b>半角英数字のみ</b>。日本語フォントは未対応です)
+          </div>
+          <div class="edit-row">
+            <input id="text-value" type="text" placeholder="TEXT" maxlength="40" />
+          </div>
+          <div class="edit-xyz">
+            <label><span>文字高</span><input id="text-size" type="number" value="10" step="1" min="1" /></label>
+            <label><span>厚み</span><input id="text-depth" type="number" value="3" step="0.5" min="0.1" /></label>
+            <label><span>Y位置</span><input id="text-y" type="number" value="0" step="1" /></label>
+          </div>
+          <div class="row-between">
+            <button id="btn-text-sub" class="btn btn-ghost" type="button">文字を彫る</button>
+            <button id="btn-text-add" class="btn btn-primary" type="button">文字を追加</button>
+          </div>
+        </details>
       </div>
 
       <!-- タブ: コード直接入力(Gemini 不使用) -->
@@ -252,7 +383,7 @@
       sitesJsonPath: 'config/subutomo-sites.json',
       logoPath: './common/assets/logo.png',
       theme: 'dark-bg',
-      version: '0.4.0',
+      version: '0.5.0',
       privacy: { localStorage: true, analytics: false },
       onSecretAction: null
     };

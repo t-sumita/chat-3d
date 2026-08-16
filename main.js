@@ -10,6 +10,8 @@ import { STLExporter } from 'three/addons/exporters/STLExporter.js';
 // パッチ版(vendor/3MFLoader.js)を使う。詳細はファイル冒頭のコメントを参照。
 import { ThreeMFLoader } from './vendor/3MFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { FontLoader } from 'three/addons/loaders/FontLoader.js';
+import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
 import { CSG } from 'three-csg-ts';
 
 // ─────────────────────────────────────────────────────────────
@@ -19,6 +21,10 @@ import { CSG } from 'three-csg-ts';
 const LS_KEY = 'chat3d.settings.v1';          // localStorage キー
 const MODEL_COLOR = 0x9ec5ff;                  // 生成メッシュの既定色
 const EXEC_HISTORY_MAX = 20;                   // 所要時間の推定に使う実行履歴の保持件数
+const UNDO_MAX = 12;                           // undo 履歴の保持段数(ジオメトリ実体を持つため控えめ)
+const WELD_PRECISION = 1e4;                    // パーツ分割時に頂点を同一視する量子化精度
+const TEXT_FONT_URL =                          // テキスト生成用フォント(半角英数のみ)
+  'https://unpkg.com/three@0.160.0/examples/fonts/helvetiker_regular.typeface.json';
 
 // LLM にコードを書かせるためのシステムプロンプト・テンプレート。
 // 開発者が後から調整しやすいよう、ここに定数として明示的に定義する。
@@ -247,6 +253,484 @@ function frameObject(obj) {
   controls.update();
 }
 
+// ─────────────────────────────────────────────────────────────
+// undo / redo(ジオメトリのスナップショットを保持する)
+// ─────────────────────────────────────────────────────────────
+
+/** @type {Array<THREE.BufferGeometry|null>} undoStack[undoIndex] が常に現在の状態 */
+const undoStack = [];
+let undoIndex = -1;
+
+/** 履歴を初期化する(モデル読み込み・クリア時)。現在状態を最初の1件として積む */
+function resetHistory() {
+  undoStack.forEach((g) => g && g.dispose());
+  undoStack.length = 0;
+  undoStack.push(targetMesh ? targetMesh.geometry.clone() : null);
+  undoIndex = 0;
+  updateHistoryButtons();
+}
+
+/** 現在のジオメトリを履歴に積む。redo 分岐は破棄される */
+function pushHistory() {
+  // 現在位置より先(redo 側)を捨ててから積む
+  undoStack.splice(undoIndex + 1).forEach((g) => g && g.dispose());
+  undoStack.push(targetMesh ? targetMesh.geometry.clone() : null);
+  // 上限超過分は古い方から捨てる
+  while (undoStack.length > UNDO_MAX) {
+    const old = undoStack.shift();
+    if (old) old.dispose();
+  }
+  undoIndex = undoStack.length - 1;
+  updateHistoryButtons();
+}
+
+/** 履歴の指定位置を画面に反映する(スナップショットは複製して渡す) */
+function applyHistoryAt(index) {
+  const snap = undoStack[index];
+  undoIndex = index;
+  if (!snap) {
+    setTargetMesh(null);
+  } else {
+    setTargetMesh(new THREE.Mesh(snap.clone(), defaultMaterial()), false);
+  }
+  clearParts();
+  updateHistoryButtons();
+  updateEditReadout();
+}
+
+function undo() {
+  if (undoIndex <= 0) return;
+  applyHistoryAt(undoIndex - 1);
+}
+
+function redo() {
+  if (undoIndex >= undoStack.length - 1) return;
+  applyHistoryAt(undoIndex + 1);
+}
+
+/** undo/redo ボタンの活性状態を更新する */
+function updateHistoryButtons() {
+  const u = document.getElementById('btn-undo');
+  const r = document.getElementById('btn-redo');
+  if (!u || !r) return;
+  u.disabled = undoIndex <= 0;
+  r.disabled = undoIndex >= undoStack.length - 1;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 直接編集(チャット不要の WYSIWYG 操作)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 重い同期処理をオーバーレイ付きで実行する。
+ * 実行前に1フレーム描画を挟み、「固まった」という誤認を防ぐ。
+ */
+async function withBusy(note, fn) {
+  setExecOverlay(true, note);
+  await nextPaint();
+  try {
+    return fn();
+  } catch (err) {
+    showError(err, '編集処理でエラーが発生しました');
+    return null;
+  } finally {
+    setExecOverlay(false);
+  }
+}
+
+/** 現在のメッシュのジオメトリを差し替え、履歴に積む */
+function commitGeometry(geometry) {
+  geometry.computeVertexNormals();
+  setTargetMesh(new THREE.Mesh(geometry, defaultMaterial()), false);
+  pushHistory();
+  clearParts();
+  updateEditReadout();
+}
+
+/** 編集タブ上部の寸法表示を更新する */
+function updateEditReadout() {
+  const el = document.getElementById('edit-size');
+  if (!el) return;
+  if (!targetMesh) {
+    el.textContent = 'モデル未読み込み';
+    return;
+  }
+  const s = meshSize(targetMesh);
+  el.textContent =
+    `寸法 ${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)} mm` +
+    ` / ${triangleCount(targetMesh).toLocaleString()} 三角形`;
+
+  // 寸法入力欄にも現在値を流し込んでおく(そのまま編集して適用できる)
+  const set = (id, v) => {
+    const i = document.getElementById(id);
+    if (i && document.activeElement !== i) i.value = v.toFixed(1);
+  };
+  set('size-x', s.x); set('size-y', s.y); set('size-z', s.z);
+}
+
+/** targetMesh のジオメトリを XYZ 倍率で拡大縮小する(原点中心) */
+async function scaleModel(sx, sy, sz) {
+  if (!requireMesh()) return;
+  if (![sx, sy, sz].every((v) => Number.isFinite(v) && v > 0)) {
+    showError(new Error('倍率は 0 より大きい数値で指定してください。'), '入力エラー');
+    return;
+  }
+  if (sx === 1 && sy === 1 && sz === 1) return;
+  await withBusy('拡大縮小を適用しています…', () => {
+    const g = targetMesh.geometry.clone();
+    g.scale(sx, sy, sz);
+    commitGeometry(g);
+  });
+}
+
+/** 目標寸法(mm)に合わせて拡大縮小する */
+async function resizeModel(tx, ty, tz, keepRatio) {
+  if (!requireMesh()) return;
+  const s = meshSize(targetMesh);
+  const ratio = (target, cur) =>
+    (Number.isFinite(target) && target > 0 && cur > 0.0001) ? target / cur : 1;
+  let rx = ratio(tx, s.x), ry = ratio(ty, s.y), rz = ratio(tz, s.z);
+  if (keepRatio) {
+    // 変更された軸のうち最初のものを全軸に適用する
+    const changed = [rx, ry, rz].find((r) => Math.abs(r - 1) > 1e-6) || 1;
+    rx = ry = rz = changed;
+  }
+  await scaleModel(rx, ry, rz);
+}
+
+/** targetMesh が無い場合にエラーを出す共通ガード */
+function requireMesh() {
+  if (targetMesh) return true;
+  showError(
+    new Error('先に STL/3MF を読み込むか、図形を追加してモデルを用意してください。'),
+    'モデルがありません');
+  return false;
+}
+
+/**
+ * 2つのメッシュを CSG 演算し、結果ジオメトリを返す。
+ * three-csg-ts は結果を「a のローカル空間 + a の行列」で返すため、
+ * 行列をジオメトリへ焼き込んでワールド空間に揃えてから返す
+ * (targetMesh に移動・回転が入っていてもズレないようにするため)。
+ */
+function csgOp(op, a, b) {
+  a.updateMatrix();
+  b.updateMatrix();
+  const res = CSG[op](a, b);
+  return res.geometry.clone().applyMatrix4(res.matrix);
+}
+
+/** 指定ジオメトリを targetMesh から削る(target が無ければ何もしない) */
+async function subtractShape(mesh, note) {
+  if (!requireMesh()) return;
+  await withBusy(note, () => {
+    const g = csgOp('subtract', targetMesh, mesh);
+    disposeMesh(mesh);
+    commitGeometry(g);
+  });
+}
+
+/** 指定ジオメトリを targetMesh に結合する(target が無ければそのまま採用) */
+async function unionShape(mesh, note) {
+  // シーンが空なら CSG は不要。指定位置を焼き込んでそのまま採用する
+  if (!targetMesh) {
+    mesh.updateMatrix();
+    commitGeometry(mesh.geometry.clone().applyMatrix4(mesh.matrix));
+    disposeMesh(mesh);
+    frameObject(targetMesh);
+    return;
+  }
+  await withBusy(note, () => {
+    const g = csgOp('union', targetMesh, mesh);
+    disposeMesh(mesh);
+    commitGeometry(g);
+  });
+}
+
+// ── パーツ分割(連結成分の自動認識)──
+
+/** @type {Array<{geometry: THREE.BufferGeometry, tris: number, size: THREE.Vector3}>} */
+let parts = [];
+let selectedPart = -1;
+let partHighlight = null;                       // 選択パーツを強調表示するメッシュ
+
+/**
+ * ジオメトリを「頂点を共有してつながっている塊」ごとに分割する。
+ * STL は頂点が重複した非インデックス形式で来るため、まず座標を量子化して
+ * 溶接(weld)し、Union-Find で三角形をグループ化する。
+ * @returns {THREE.BufferGeometry[]} 分割後のジオメトリ(三角形数の多い順)
+ */
+function splitConnectedComponents(geometry) {
+  const pos = geometry.getAttribute('position');
+  const index = geometry.index;
+  const corners = index ? index.count : pos.count;   // 三角形の頂点参照数
+  const triCount = Math.floor(corners / 3);
+  if (triCount === 0) return [];
+
+  // 1) 座標を量子化して同一頂点をまとめ、連番 ID を振る
+  const idOf = new Map();
+  const cornerId = new Int32Array(corners);
+  let nextId = 0;
+  for (let c = 0; c < corners; c++) {
+    const vi = index ? index.getX(c) : c;
+    const key =
+      Math.round(pos.getX(vi) * WELD_PRECISION) + ',' +
+      Math.round(pos.getY(vi) * WELD_PRECISION) + ',' +
+      Math.round(pos.getZ(vi) * WELD_PRECISION);
+    let id = idOf.get(key);
+    if (id === undefined) { id = nextId++; idOf.set(key, id); }
+    cornerId[c] = id;
+  }
+
+  // 2) Union-Find。三角形の3頂点を同じ集合に併合する
+  const parent = new Int32Array(nextId);
+  for (let i = 0; i < nextId; i++) parent[i] = i;
+  const find = (x) => {
+    let r = x;
+    while (parent[r] !== r) r = parent[r];
+    while (parent[x] !== r) { const n = parent[x]; parent[x] = r; x = n; }  // 経路圧縮
+    return r;
+  };
+  const union = (a, b) => {
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) parent[rb] = ra;
+  };
+  for (let t = 0; t < triCount; t++) {
+    const a = cornerId[t * 3], b = cornerId[t * 3 + 1], c = cornerId[t * 3 + 2];
+    union(a, b);
+    union(b, c);
+  }
+
+  // 3) 三角形を根ごとにまとめる
+  const buckets = new Map();
+  for (let t = 0; t < triCount; t++) {
+    const root = find(cornerId[t * 3]);
+    let arr = buckets.get(root);
+    if (!arr) { arr = []; buckets.set(root, arr); }
+    arr.push(t);
+  }
+
+  // 4) 各グループを非インデックスの BufferGeometry として切り出す
+  const out = [];
+  for (const tris of buckets.values()) {
+    const arr = new Float32Array(tris.length * 9);
+    let o = 0;
+    for (const t of tris) {
+      for (let k = 0; k < 3; k++) {
+        const vi = index ? index.getX(t * 3 + k) : t * 3 + k;
+        arr[o++] = pos.getX(vi);
+        arr[o++] = pos.getY(vi);
+        arr[o++] = pos.getZ(vi);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+    g.computeVertexNormals();
+    out.push(g);
+  }
+  // 大きいパーツから並べた方が一覧で選びやすい
+  out.sort((a, b) => b.getAttribute('position').count - a.getAttribute('position').count);
+  return out;
+}
+
+/** パーツ一覧・選択状態・強調表示をすべて破棄する */
+function clearParts() {
+  parts.forEach((p) => p.geometry.dispose());
+  parts = [];
+  selectedPart = -1;
+  removePartHighlight();
+  const list = document.getElementById('parts-list');
+  const ops = document.getElementById('parts-ops');
+  if (list) { list.innerHTML = ''; list.classList.add('hidden'); }
+  if (ops) ops.classList.add('hidden');
+}
+
+function removePartHighlight() {
+  if (!partHighlight) return;
+  scene.remove(partHighlight);
+  disposeMesh(partHighlight);
+  partHighlight = null;
+}
+
+/** パーツを分割して一覧 UI を作る */
+async function runSplitParts() {
+  if (!requireMesh()) return;
+  await withBusy('パーツを認識しています…', () => {
+    clearParts();
+    const geoms = splitConnectedComponents(targetMesh.geometry);
+    parts = geoms.map((g) => {
+      g.computeBoundingBox();
+      const size = new THREE.Vector3();
+      g.boundingBox.getSize(size);
+      return { geometry: g, tris: Math.floor(g.getAttribute('position').count / 3), size };
+    });
+    renderPartsList();
+  });
+}
+
+/** パーツ一覧を描画する */
+function renderPartsList() {
+  const list = document.getElementById('parts-list');
+  list.innerHTML = parts.map((p, i) =>
+    `<button class="part-item" type="button" data-i="${i}">` +
+    `<span class="part-no">#${i + 1}</span>` +
+    `<span>${p.size.x.toFixed(1)}×${p.size.y.toFixed(1)}×${p.size.z.toFixed(1)}mm</span>` +
+    `<span class="part-meta">${p.tris.toLocaleString()} 三角形</span></button>`).join('');
+  list.classList.remove('hidden');
+  list.querySelectorAll('.part-item').forEach((btn) => {
+    btn.addEventListener('click', () => selectPart(Number(btn.dataset.i)));
+  });
+  logChat('sys', `パーツを ${parts.length} 個認識しました(編集タブの一覧から選べます)。`);
+}
+
+/** パーツを選択し、ビューポート上で強調表示する */
+function selectPart(i) {
+  selectedPart = i;
+  document.querySelectorAll('.part-item').forEach((b) =>
+    b.classList.toggle('part-item-active', Number(b.dataset.i) === i));
+  document.getElementById('parts-ops').classList.toggle('hidden', i < 0);
+
+  removePartHighlight();
+  if (i < 0 || !parts[i]) return;
+  partHighlight = new THREE.Mesh(
+    parts[i].geometry.clone(),
+    new THREE.MeshBasicMaterial({ color: 0xffb347, wireframe: true, transparent: true, opacity: 0.9 }));
+  scene.add(partHighlight);
+}
+
+/** 選択中パーツだけを、そのパーツの中心を基準に拡大縮小して全体を組み直す */
+async function scaleSelectedPart(sx, sy, sz) {
+  if (selectedPart < 0 || !parts[selectedPart]) return;
+  if (![sx, sy, sz].every((v) => Number.isFinite(v) && v > 0)) {
+    showError(new Error('倍率は 0 より大きい数値で指定してください。'), '入力エラー');
+    return;
+  }
+  await withBusy('パーツを変形しています…', () => {
+    const target = parts[selectedPart];
+    const g = target.geometry.clone();
+    // パーツ自身の中心を原点に持っていってから拡大し、元の位置へ戻す
+    g.computeBoundingBox();
+    const c = g.boundingBox.getCenter(new THREE.Vector3());
+    g.translate(-c.x, -c.y, -c.z);
+    g.scale(sx, sy, sz);
+    g.translate(c.x, c.y, c.z);
+
+    const merged = mergeGeometries(
+      parts.map((p, i) => (i === selectedPart ? g : p.geometry)), false);
+    if (!merged) throw new Error('パーツの再結合に失敗しました。');
+    g.dispose();
+    commitGeometry(merged);
+  });
+}
+
+/** 選択中パーツを削除して全体を組み直す */
+async function deleteSelectedPart() {
+  if (selectedPart < 0 || !parts[selectedPart]) return;
+  if (parts.length <= 1) {
+    showError(new Error('最後の1パーツは削除できません。「クリア」を使ってください。'), '削除できません');
+    return;
+  }
+  await withBusy('パーツを削除しています…', () => {
+    const rest = parts.filter((_, i) => i !== selectedPart).map((p) => p.geometry);
+    const merged = mergeGeometries(rest, false);
+    if (!merged) throw new Error('パーツの再結合に失敗しました。');
+    commitGeometry(merged);
+  });
+}
+
+// ── 消しゴム ──
+
+let eraserOn = false;
+const eraserRay = new THREE.Raycaster();
+const eraserPointer = new THREE.Vector2();
+
+/** 消しゴムモードの ON/OFF を切り替える */
+function setEraser(on) {
+  eraserOn = on;
+  const btn = document.getElementById('btn-eraser');
+  btn.textContent = `消しゴム: ${on ? 'ON' : 'OFF'}`;
+  btn.classList.toggle('btn-primary', on);
+  btn.classList.toggle('btn-ghost', !on);
+  document.getElementById('viewport').classList.toggle('erasing', on);
+  if (on) logChat('sys', 'モデルをクリックすると、その位置を球状に削ります。');
+}
+
+/** クリック位置のモデル表面を球で削る */
+async function eraseAtPointer(ev) {
+  if (!eraserOn || !targetMesh) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  eraserPointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+  eraserPointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+  eraserRay.setFromCamera(eraserPointer, camera);
+  const hit = eraserRay.intersectObject(targetMesh, false)[0];
+  if (!hit) return;
+
+  const r = Math.max(0.5, Number(document.getElementById('eraser-size').value) || 5);
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 16));
+  ball.position.copy(hit.point);
+  await subtractShape(ball, `半径 ${r}mm で削っています…`);
+}
+
+// ── 図形・テキストの追加 ──
+
+/** 入力値から基本図形メッシュを組み立てる */
+function buildPrimitive() {
+  const num = (id, min) => Math.max(min, Number(document.getElementById(id).value) || min);
+  const kind = document.getElementById('prim-kind').value;
+  const w = num('prim-w', 0.1), h = num('prim-h', 0.1), d = num('prim-d', 0.1);
+
+  let geo;
+  switch (kind) {
+    case 'cylinder': geo = new THREE.CylinderGeometry(w / 2, w / 2, h, 48); break;
+    case 'sphere':   geo = new THREE.SphereGeometry(w / 2, 48, 24); break;
+    case 'cone':     geo = new THREE.ConeGeometry(w / 2, h, 48); break;
+    default:         geo = new THREE.BoxGeometry(w, h, d); break;
+  }
+  const mesh = new THREE.Mesh(geo);
+  mesh.position.set(
+    Number(document.getElementById('prim-x').value) || 0,
+    Number(document.getElementById('prim-y').value) || 0,
+    Number(document.getElementById('prim-z').value) || 0);
+  return mesh;
+}
+
+let cachedFont = null;
+
+/** テキスト用フォントを遅延ロードする(半角英数のみ対応) */
+async function loadTextFont() {
+  if (cachedFont) return cachedFont;
+  cachedFont = await new Promise((resolve, reject) => {
+    new FontLoader().load(TEXT_FONT_URL, resolve, undefined,
+      () => reject(new Error('フォントの読み込みに失敗しました(ネットワークを確認してください)。')));
+  });
+  return cachedFont;
+}
+
+/** 入力値から立体テキストのメッシュを組み立てる */
+async function buildTextMesh() {
+  const value = document.getElementById('text-value').value.trim();
+  if (!value) {
+    showError(new Error('追加する文字を入力してください。'), '入力エラー');
+    return null;
+  }
+  // helvetiker は日本語グリフを持たないため、非対応文字は明示的に弾く
+  if (!/^[\x20-\x7E]+$/.test(value)) {
+    showError(
+      new Error('半角英数字・記号のみ対応しています(日本語フォントは未対応)。'),
+      'この文字は使えません');
+    return null;
+  }
+  const font = await loadTextFont();
+  const size = Math.max(1, Number(document.getElementById('text-size').value) || 10);
+  const depth = Math.max(0.1, Number(document.getElementById('text-depth').value) || 3);
+
+  const geo = new TextGeometry(value, { font, size, height: depth, curveSegments: 8, bevelEnabled: false });
+  geo.center();
+  const mesh = new THREE.Mesh(geo);
+  mesh.position.y = Number(document.getElementById('text-y').value) || 0;
+  return mesh;
+}
+
 /** 画面上のモード/メッシュ状態バッジを更新する */
 function updateBadges() {
   const modeBadge = document.getElementById('mode-badge');
@@ -315,6 +799,10 @@ function loadModelFile(file) {
       }
       const mesh = new THREE.Mesh(geometry, defaultMaterial());
       setTargetMesh(mesh);
+      // 読み込み直後を履歴の起点にする(以降の編集はここまで戻せる)
+      clearParts();
+      resetHistory();
+      updateEditReadout();
       logChat('sys', `${isStl ? 'STL' : '3MF'} を読み込みました: ${file.name}`);
     } catch (err) {
       showError(err, 'モデルの読み込みに失敗しました');
@@ -506,6 +994,10 @@ async function runUserCode(code) {
     const mesh = result || ret;
     if (mesh && mesh.isMesh) {
       setTargetMesh(mesh);
+      // コード実行結果も undo 対象にする
+      clearParts();
+      pushHistory();
+      updateEditReadout();
       recordRunTime(inTris || triangleCount(mesh), elapsed);
       showDebugReport({ ok: true, elapsed, inTris, outTris: triangleCount(mesh), logs, est });
       return true;
@@ -756,6 +1248,80 @@ function setChatMode(mode) {
   }
 }
 
+/** 編集タブの配線。数値入力 → ジオメトリ操作 → 履歴 という流れに統一する */
+function initEditUI() {
+  const num = (id) => Number(document.getElementById(id).value);
+
+  // 全体倍率 / XYZ 個別倍率
+  document.getElementById('btn-scale-all').addEventListener('click', () => {
+    const s = num('scale-all');
+    scaleModel(s, s, s);
+  });
+  document.getElementById('btn-scale-xyz').addEventListener('click', () => {
+    scaleModel(num('scale-x'), num('scale-y'), num('scale-z'));
+  });
+  // 目標寸法(mm)を指定して合わせる
+  document.getElementById('btn-size-apply').addEventListener('click', () => {
+    resizeModel(num('size-x'), num('size-y'), num('size-z'),
+      document.getElementById('size-keep-ratio').checked);
+  });
+
+  // 消しゴム
+  document.getElementById('btn-eraser').addEventListener('click', () => setEraser(!eraserOn));
+
+  // パーツ分割
+  document.getElementById('btn-split').addEventListener('click', runSplitParts);
+  document.getElementById('btn-part-scale').addEventListener('click', () => {
+    scaleSelectedPart(num('part-sx'), num('part-sy'), num('part-sz'));
+  });
+  document.getElementById('btn-part-delete').addEventListener('click', deleteSelectedPart);
+
+  // 図形の追加 / 削り
+  document.getElementById('btn-prim-add').addEventListener('click', () => {
+    unionShape(buildPrimitive(), '図形を結合しています…');
+  });
+  document.getElementById('btn-prim-sub').addEventListener('click', () => {
+    subtractShape(buildPrimitive(), '図形で削っています…');
+  });
+
+  // テキストの追加 / 彫り込み
+  document.getElementById('btn-text-add').addEventListener('click', async () => {
+    const m = await buildTextMesh();
+    if (m) unionShape(m, '文字を結合しています…');
+  });
+  document.getElementById('btn-text-sub').addEventListener('click', async () => {
+    const m = await buildTextMesh();
+    if (m) subtractShape(m, '文字を彫っています…');
+  });
+
+  // undo / redo(ボタンとショートカット)
+  document.getElementById('btn-undo').addEventListener('click', undo);
+  document.getElementById('btn-redo').addEventListener('click', redo);
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const k = e.key.toLowerCase();
+    // 入力欄での Ctrl+Z はブラウザ標準のテキスト取り消しに任せる
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'textarea' || tag === 'input') return;
+    if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+  });
+
+  // 消しゴムのクリック判定。ドラッグ(視点回転)と区別するため移動量を見る
+  let downAt = null;
+  renderer.domElement.addEventListener('pointerdown', (e) => {
+    downAt = { x: e.clientX, y: e.clientY };
+  });
+  renderer.domElement.addEventListener('pointerup', (e) => {
+    if (!downAt) return;
+    const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
+    downAt = null;
+    if (moved < 5) eraseAtPointer(e);
+  });
+
+  updateEditReadout();
+}
+
 /**
  * 指示のヒント欄を生成する。テンプレートはクリックで入力欄に引用でき、
  * 「できないこと」は引用不可の情報として併記して期待値を先に揃える。
@@ -919,11 +1485,18 @@ function initUI() {
   // 指示のヒント(できること / できないこと)
   initHintLibrary();
 
+  // 編集タブ(チャット不要の直接操作)
+  initEditUI();
+
   // ヘッダ操作
   document.getElementById('btn-download').addEventListener('click', downloadStl);
   document.getElementById('btn-reset').addEventListener('click', () => {
     setTargetMesh(null);
     clearError();
+    clearParts();
+    setEraser(false);
+    resetHistory();
+    updateEditReadout();
     logChat('sys', 'シーンをクリアしました(ゼロベース生成モード)。');
   });
 
@@ -976,7 +1549,9 @@ function main() {
   initDragAndDrop();
   initUI();
   updateBadges();
+  resetHistory();
   logChat('sys', 'ようこそ。指示だけでゼロから生成、または STL/3MF を D&D して編集できます。');
+  logChat('sys', 'チャットを使わずに直接編集したい場合は「編集」タブへ。拡大縮小・消しゴム・パーツ分割・図形/文字の追加ができます。');
   setChatMode('copy');
 }
 

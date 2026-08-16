@@ -242,13 +242,14 @@ html, body {
 }
 .tab {
   flex: 1;
-  padding: 10px 6px;
+  padding: 10px 4px;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--muted);
   font-family: var(--font);
-  font-size: 12.5px;
+  font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
 }
 .tab:hover { color: var(--text); }
@@ -357,6 +358,65 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 .row-end { display: flex; justify-content: flex-end; }
 .row-between { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; gap: 8px; }
 .btn-group { display: flex; gap: 8px; }
+
+/* ── 編集タブ ── */
+.edit-size {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--accent);
+  background: var(--panel-bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 7px 10px;
+  margin: 0 0 12px;
+}
+.edit-sec { flex: 0 0 auto; margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel-bg2); }
+.edit-sec > summary { cursor: pointer; padding: 9px 12px; font-size: 12.5px; font-weight: 600; color: var(--text); }
+.edit-sec > summary:hover { color: var(--accent); }
+.edit-sec > *:not(summary) { margin-left: 12px; margin-right: 12px; }
+.edit-sec > *:last-child { margin-bottom: 12px; }
+
+.edit-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.edit-row input[type="number"] { width: 82px; flex: 0 0 auto; }
+.edit-row input[type="text"] { flex: 1; }
+.edit-row select { flex: 1; }
+.edit-label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.edit-unit { font-size: 11px; color: var(--muted); }
+.edit-note { font-size: 11px; color: var(--muted); line-height: 1.55; margin-bottom: 7px; }
+.edit-sep { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
+
+.edit-xyz { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-bottom: 9px; }
+.edit-xyz label { display: flex; flex-direction: column; gap: 3px; }
+.edit-xyz span { font-size: 10.5px; color: var(--muted); }
+.edit-xyz input { width: 100%; padding: 7px 8px; font-size: 12px; }
+
+.edit-check { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); cursor: pointer; }
+.edit-check input { width: auto; }
+
+/* パーツ一覧 */
+.parts-list { max-height: 30vh; overflow-y: auto; margin: 9px 0; display: flex; flex-direction: column; gap: 5px; }
+.part-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-bg);
+  color: var(--text);
+  font-size: 11.5px;
+  cursor: pointer;
+  text-align: left;
+}
+.part-item:hover { border-color: var(--accent); }
+.part-item-active { border-color: var(--accent); background: rgba(158, 197, 255, 0.16); }
+.part-no { font-family: var(--mono); color: var(--accent); flex: 0 0 auto; }
+.part-meta { color: var(--muted); font-family: var(--mono); font-size: 10.5px; margin-left: auto; text-align: right; }
+
+/* 消しゴム ON のときはカーソルで分かるようにする */
+#viewport.erasing canvas { cursor: crosshair; }
+.btn-icon { padding: 7px 10px; font-size: 15px; line-height: 1; }
 
 /* ── 実行レポート(所要時間・統計・console 出力) ── */
 #debug-box {

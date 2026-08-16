@@ -15,8 +15,8 @@ Chat 3D は「UI 骨格(index.html)」「中核ロジック(main.js)」「テー
   コード直接入力 ──────────────────────────────► runUserCode(new Function)
                                                              ▼
                                         setResult(mesh) → setTargetMesh → 再描画
-                                                             ▼
-                              「STL ダウンロード」→ STLExporter(binary)
+                              ▲                              ▼
+  「編集」タブ ─► withBusy → commitGeometry ─┘  「STL 保存」→ STLExporter(binary)
 ```
 
 ## 状態管理: `targetMesh`
@@ -59,6 +59,64 @@ LLM は読み込んだ形状を見ていないため、指示できる範囲に�
 - 形を指し示す指示は通らないので、寸法と座標で伝える。**3D ビューを見て判断するのは
   ユーザーの役割**、という分担がこのツールの前提。
 
+## 直接編集エンジン(「編集」タブ)
+チャット/LLM を介さず、マウスと数値入力だけで形を直すための層。すべての操作は
+最終的に `commitGeometry(geometry)` に集約される。
+
+```
+  UI 操作 ─► withBusy(note, fn) ─► ジオメトリ加工 ─► commitGeometry()
+                  │                                       │
+       オーバーレイ表示 + nextPaint()        computeVertexNormals
+       例外は showError()、finally で解除     → setTargetMesh → pushHistory
+                                              → clearParts → updateEditReadout
+```
+
+- `withBusy()` は `runUserCode()` と同じ「先に描画してからブロックする」手順を共有する。
+  CSG を伴う編集(消しゴム・図形の結合/削り)は同期処理で重いため、この層を必ず通す。
+- `updateEditReadout()` は現在の bbox を `#edit-size` に出し、`size-x/y/z` 入力へ
+  逆流させる。ただし**フォーカス中の入力は上書きしない**(編集中の値を壊さないため)。
+
+### undo / redo
+- `undoStack` はジオメトリのスナップショット配列で、`undoStack[undoIndex]` が**常に現在の
+  状態**を指す(差分ではなく実体を持つ)。空シーンは `null` として積む。
+- `pushHistory()` は redo 側(`undoIndex` より後ろ)を破棄し、あふれた分は `dispose()` する。
+  実体を持つため段数は `UNDO_MAX = 12` に制限している。
+- `applyHistoryAt()` はスナップショットを clone して新しいメッシュを作る(スタック内の
+  ジオメトリを直接シーンに渡すと、以後の編集で履歴が壊れるため)。
+- 入り口は ↶/↷ ボタンと Ctrl+Z / Ctrl+Y。キーハンドラは `e.target` が
+  `textarea` / `input` のときは何もせず、ブラウザ標準のテキスト undo を邪魔しない。
+
+### CSG 結果の座標系(`csgOp`)
+`three-csg-ts` の `toMesh` は**演算子 A のローカル空間**でジオメトリを返し、`mesh.matrix` に
+A の行列を入れて返す。行列を捨てると `targetMesh` が変換を持っていた場合に形がずれるため、
+`csgOp()` は必ず `res.geometry.clone().applyMatrix4(res.matrix)` で焼き込んでから返す。
+
+### パーツ分割(`splitConnectedComponents`)
+1. 頂点座標を `WELD_PRECISION` で量子化してキー化し、同一座標の頂点を溶接する
+   （STL は頂点が三角形ごとに重複しているため、この溶接が無いと分割できない）。
+2. 三角形の 3 頂点を Union-Find(経路圧縮)で連結し、連結成分を求める。
+3. 根ごとに三角形をバケット分けし、成分ごとの非 index BufferGeometry を作る。
+   頂点数の降順に並べるので、一覧の先頭が最大の塊になる。
+
+選択中パーツは橙のワイヤフレーム(`partHighlight`)で重ね描きする。パーツ単位の拡大縮小は
+**そのパーツ自身の中心**へ平行移動 → スケール → 戻す、で行い、最後に `mergeGeometries` で
+全パーツを 1 つに戻す。ジオメトリを変更すると分割状態は無効になるため、`commitGeometry()`
+から `clearParts()` を呼んで一覧を解除する（再度「分割」を押してもらう）。
+
+### 消しゴム
+`Raycaster` で交点を取り、その位置に半径指定の球メッシュを置いて `subtractShape()` する。
+視点のドラッグ回転と区別するため、`pointerdown` → `pointerup` の移動量が **5px 未満**の
+ときだけクリックとみなす。1 クリックごとに CSG が 1 回走るので、密なメッシュでは遅い。
+
+### 図形・テキスト追加
+- `buildPrimitive()` — Box / Cylinder / Sphere / Cone をサイズと位置(mm)から生成。
+- `buildTextMesh()` — `FontLoader` で helvetiker を 1 度だけ取得してキャッシュし
+  (`cachedFont`)、`TextGeometry` で押し出す。r160 の `TextGeometry` は `height` を
+  内部で `depth` に読み替えるため `height` を渡す。日本語グリフを持たないフォントなので、
+  入力が半角英数記号以外なら実行せずエラーを出す。
+- いずれも「結合(`unionShape`)」「削り取り(`subtractShape`)」の両方に流せる。
+  空シーンで結合した場合は CSG を通さず、そのメッシュ自体を最初の `targetMesh` にする。
+
 ## 3MF 読み込み
 - `ThreeMFLoader.parse(buffer)` はシーンに追加していない `THREE.Group` を同期的に返す。
 - `group.updateMatrixWorld(true)` を呼んでから各 `Mesh` を走査し、`position` 属性(と
@@ -99,7 +157,8 @@ LLM は読み込んだ形状を見ていないため、指示できる範囲に�
 - `version` は `package.json` と同期し、`?v=` キャッシュバスティングに使う。
 
 ## 今後の拡張候補
-- 複数メッシュ（部品）管理と選択 UI。
+- 日本語フォント対応(現状のテキスト追加は半角英数記号のみ)。
+- パーツの平行移動・回転(現状は拡大縮小と削除のみ)。
 - 生成コード履歴の保存 / 再実行。
 - three-csg-ts の演算失敗（非多様体メッシュ等）に対するリカバリ提示。
 - glTF / OBJ など STL 以外の入出力。
