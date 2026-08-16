@@ -22,6 +22,7 @@ const LS_KEY = 'chat3d.settings.v1';          // localStorage キー
 const MODEL_COLOR = 0x9ec5ff;                  // 生成メッシュの既定色
 const EXEC_HISTORY_MAX = 20;                   // 所要時間の推定に使う実行履歴の保持件数
 const UNDO_MAX = 12;                           // undo 履歴の保持段数(ジオメトリ実体を持つため控えめ)
+const PROMPT_VERSION = 2;                      // DEFAULT_SYSTEM_PROMPT を更新したら上げる
 const TRI_WARN = 20000;                        // これを超えたら「重い処理」として強い警告を出す
 const TRI_CONFIRM = 60000;                     // これを超えたら実行前に明示的な確認を求める
 const WELD_PRECISION = 1e4;                    // パーツ分割時に頂点を同一視する量子化精度
@@ -52,6 +53,25 @@ const DEFAULT_SYSTEM_PROMPT = `あなたは Three.js と three-csg-ts に精通�
 3. マテリアルは付けても付けなくても構いません(未指定なら側で付与)。
 4. import 文・関数定義の外枠・説明文・markdown 見出しは書かないこと。
    返答は次の1つの \`\`\`js コードブロックのみ。前後に文章を付けないこと。
+
+# 計算負荷を抑えるルール(重要)
+CSG はブラウザのメインスレッドで同期実行されます。三角形数が増えると所要時間が
+急激に伸び、ブラウザが応答しなくなって作業が失われることがあります。
+また CSG は演算のたびに結果の三角形数を増やすため、加工を重ねるほど不利になります。
+形状が破綻しない範囲で、次を必ず守ってください。
+
+1. 分割数(segments)は既定値に任せず、必ず明示して控えめにすること。
+   - CylinderGeometry / ConeGeometry の radialSegments は 24 以下。
+     小さな穴やネジ下穴なら 12〜16 で十分です。
+   - SphereGeometry は widthSegments=16, heightSegments=12 程度。
+   - TorusGeometry など分割数が多くなる形状は、本当に必要なときだけ使うこと。
+2. CSG の呼び出し回数を最小にすること。同じ結果になるなら回数が少ない方を選ぶ。
+3. 移動・回転・拡大縮小・反転は CSG を使わず、geometry.translate() /
+   geometry.rotateX() / geometry.scale() で直接行うこと。
+   これらに CSG は不要で、使うと三角形数が無駄に増えます。
+4. ループで多数のメッシュを作り 1 つずつ CSG するのは避けること。
+   繰り返しが 10 個を超える場合は、CSG 回数がそのまま所要時間になることを
+   コード内のコメント(// …)で 1 行だけ注意喚起すること。
 
 # 出力フォーマット
 \`\`\`js
@@ -1185,9 +1205,18 @@ function clearError() {
 function buildContext() {
   if (targetMesh) {
     const s = meshSize(targetMesh);
+    const tris = triangleCount(targetMesh);
+    // 三角形数を伝えると、LLM が分割数や CSG 回数を規模に合わせて調整できる
+    const load = tris >= TRI_CONFIRM
+      ? `\n**このモデルは既に非常に重い状態です。三角形数をこれ以上増やさないことを最優先し、` +
+        `分割数は最小限(円筒 12〜16)、CSG は 1 回だけにしてください。**`
+      : tris >= TRI_WARN
+        ? `\n**このモデルは既に重い部類です。分割数を抑え、CSG の回数を最小にしてください。**`
+        : '';
     return `# 現在の状態\n` +
       `targetMesh が存在します(バウンディングボックス: ` +
       `${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)} mm、原点中心)。\n` +
+      `現在の三角形数: ${tris.toLocaleString()}。${load}\n` +
       `この targetMesh を CSG で加工し、加工後のメッシュを setResult() で登録してください。\n` +
       `元の targetMesh は自動で置換されます。`;
   }
@@ -1501,12 +1530,21 @@ function loadSettings() {
   const defaults = {
     apiKey: '', model: 'gemini-2.5-flash',
     systemPrompt: DEFAULT_SYSTEM_PROMPT, execHistory: [],
+    promptVersion: PROMPT_VERSION, promptEdited: false,
   };
+  let s = defaults;
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) return Object.assign(defaults, JSON.parse(raw));
+    if (raw) s = Object.assign({}, defaults, JSON.parse(raw));
   } catch (_) { /* 破損時は既定値 */ }
-  return defaults;
+
+  // 保存済みプロンプトをユーザーが編集していなければ、既定の更新に追従させる。
+  // これが無いと、一度でも設定を保存した環境に新しい既定プロンプトが届かない。
+  if (!s.promptEdited && s.promptVersion !== PROMPT_VERSION) {
+    s.systemPrompt = DEFAULT_SYSTEM_PROMPT;
+    s.promptVersion = PROMPT_VERSION;
+  }
+  return s;
 }
 
 function saveSettings() {
@@ -1634,9 +1672,17 @@ function initUI() {
 
   apiKey.addEventListener('change', () => { settings.apiKey = apiKey.value.trim(); saveSettings(); });
   apiModel.addEventListener('change', () => { settings.model = apiModel.value; saveSettings(); });
-  sysPrompt.addEventListener('change', () => { settings.systemPrompt = sysPrompt.value; saveSettings(); });
+  sysPrompt.addEventListener('change', () => {
+    settings.systemPrompt = sysPrompt.value;
+    // 手で編集した以降は、既定プロンプトの更新で上書きしない
+    settings.promptEdited = sysPrompt.value !== DEFAULT_SYSTEM_PROMPT;
+    settings.promptVersion = PROMPT_VERSION;
+    saveSettings();
+  });
   document.getElementById('btn-reset-prompt').addEventListener('click', () => {
     settings.systemPrompt = DEFAULT_SYSTEM_PROMPT;
+    settings.promptEdited = false;
+    settings.promptVersion = PROMPT_VERSION;
     sysPrompt.value = DEFAULT_SYSTEM_PROMPT;
     saveSettings();
   });
