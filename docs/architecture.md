@@ -40,6 +40,24 @@ Chat 3D は「UI 骨格(index.html)」「中核ロジック(main.js)」「テー
 - 複数メッシュがあれば `BufferGeometryUtils.mergeGeometries` で 1 つに統合し、
   `computeVertexNormals()` で法線を再計算してから `center()` する(STL 読み込みと
   同じ「原点中心に寄せる」挙動に揃えるため)。
+- `ThreeMFLoader` は CDN の three.js 標準実装ではなく `vendor/3MFLoader.js`(three@0.160.0
+  からの改変版・MIT)を使う。標準実装は複数 `.model` パート構成の 3MF で、他パートに
+  定義された objectId への `<component>` 参照を解決できずに例外を投げるバグがあるため、
+  全パート横断の `objectId → modelData` マップ(`allObjectData`)を先に構築してから
+  `buildObject` で解決するよう patch している。詳細は同ファイル冒頭のコメントを参照。
+
+## チャットの 2 モード(コピペ / API)
+- `chatMode`(`'copy'` | `'api'`、既定 `'copy'`)で挙動を分岐する。`setChatMode()` が
+  トグルボタンの見た目・送信ボタンのラベル・`#paste-back` の表示/非表示を切り替え、
+  各モード初回切替時のみガイドメッセージを `logChat('sys', ...)` でチャットログに流す。
+- **コピペモード**: `handleChatCopy()` が `buildSystemPrompt() + 指示` を組み立てて
+  `navigator.clipboard.writeText()` でコピーし、`logCopyPrompt()` で `<details>` に
+  折りたたんだプロンプト全文をログへ残す。外部 LLM の回答は `#paste-input` に貼り付け、
+  `handlePasteRun()` が `extractCode()` → `runUserCode()` で反映する。
+- **API モード**: 既存の `handleChatSend()`(Gemini REST 呼び出し)をそのまま使う。
+- `extractCode()` / `renderAiText()` のコードフェンス正規表現は ` ```js ` 等の言語タグに
+  限らず ` ```\w*` 全般にマッチするよう緩めてあり、他 LLM が付与するタグ違いのフェンスや
+  タグなしフェンスも扱える。
 
 ## Gemini 連携
 - エンドポイント: `POST /v1beta/models/{model}:generateContent?key=...`

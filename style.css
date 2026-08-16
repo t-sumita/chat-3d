@@ -1,12 +1,15 @@
 /* style.css — Chat 3D の全体レイアウトと UI テーマ(ダーク) */
 
 :root {
-  --bg:        #0b0d14;
-  --panel-bg:  #12151f;
-  --panel-bg2: #171b28;
-  --border:    rgba(255, 255, 255, 0.10);
-  --text:      #e7e9f0;
-  --muted:     rgba(231, 233, 240, 0.55);
+  /* 全体的に暗すぎて視認しづらいとのフィードバックを受け、パネル/入力欄を
+     明確に明るさの異なる階調に分けている(bg < panel-bg < panel-bg2 < field-bg)。*/
+  --bg:        #14161e;
+  --panel-bg:  #1b1e29;
+  --panel-bg2: #262b3a;
+  --field-bg:  #2c3143;
+  --border:    rgba(255, 255, 255, 0.18);
+  --text:      #f3f4f8;
+  --muted:     rgba(243, 244, 248, 0.68);
   --accent:    #9ec5ff;
   --accent-2:  #E67E22;
   --danger:    #ff6b6b;
@@ -216,6 +219,25 @@ html, body {
 .tab-panel { display: none; flex: 1; min-height: 0; flex-direction: column; padding: 14px 16px 54px; overflow-y: auto; }
 .tab-panel-active { display: flex; }
 
+/* ── チャットモード切替(コピペ/API) ── */
+.mode-toggle { display: flex; gap: 8px; margin-bottom: 10px; flex: 0 0 auto; }
+.mode-btn {
+  flex: 1;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-bg2);
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 12px;
+  cursor: pointer;
+}
+.mode-btn:hover { border-color: var(--accent); }
+.mode-btn-active { color: var(--text); border-color: var(--accent); background: rgba(158, 197, 255, 0.14); }
+
+.paste-back { flex: 0 0 auto; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.paste-back-label { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 6px; }
+
 /* ── チャット ── */
 #chat-log {
   flex: 1;
@@ -231,7 +253,8 @@ html, body {
 .msg-ai { align-self: flex-start; background: var(--panel-bg2); border: 1px solid var(--border); max-width: 92%; }
 .msg-sys { align-self: center; color: var(--muted); font-size: 12px; font-style: italic; }
 .msg-ai code, .msg-ai pre { font-family: var(--mono); font-size: 12px; }
-.msg-ai pre { background: #0b0d14; padding: 8px; border-radius: 6px; overflow-x: auto; border: 1px solid var(--border); }
+.msg-ai pre { background: rgba(0, 0, 0, 0.32); padding: 8px; border-radius: 6px; overflow-x: auto; border: 1px solid var(--border); }
+.msg-ai summary { cursor: pointer; color: var(--accent); font-size: 12px; }
 
 #chat-form { display: flex; flex-direction: column; gap: 8px; }
 
@@ -241,12 +264,13 @@ textarea, input, select {
   font-family: var(--mono);
   font-size: 13px;
   color: var(--text);
-  background: #0b0d14;
+  background: var(--field-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 9px 11px;
   resize: vertical;
 }
+textarea::placeholder, input::placeholder { color: var(--muted); opacity: 1; }
 textarea:focus, input:focus, select:focus { outline: none; border-color: var(--accent); }
 #code-input, #sys-prompt { flex: 0 0 auto; }
 

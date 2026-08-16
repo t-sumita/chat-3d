@@ -6,7 +6,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
-import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js';
+// 標準の 3MFLoader は複数パート構成の 3MF で component 参照が解決できず落ちるため、
+// パッチ版(vendor/3MFLoader.js)を使う。詳細はファイル冒頭のコメントを参照。
+import { ThreeMFLoader } from './vendor/3MFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CSG } from 'three-csg-ts';
 
@@ -338,7 +340,7 @@ function stamp() {
  */
 function extractCode(text) {
   if (!text) return '';
-  const fenced = text.match(/```(?:js|javascript)?\s*([\s\S]*?)```/i);
+  const fenced = text.match(/```(?:\w+)?\s*([\s\S]*?)```/i);
   return (fenced ? fenced[1] : text).trim();
 }
 
@@ -506,8 +508,78 @@ function logChat(role, text) {
 /** AI 応答の ```js``` ブロックを <pre> に整形(簡易・XSS 対策で必ずエスケープ) */
 function renderAiText(text) {
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  return esc(text).replace(/```(?:js|javascript)?\s*([\s\S]*?)```/gi,
+  return esc(text).replace(/```(?:\w+)?\s*([\s\S]*?)```/gi,
     (_, code) => `<pre>${code.trim()}</pre>`);
+}
+
+// ─────────────────────────────────────────────────────────────
+// チャットモード(コピペ / API)
+// ─────────────────────────────────────────────────────────────
+
+/** @type {'copy'|'api'} 現在のチャットモード */
+let chatMode = 'copy';
+const modeGuideShown = { copy: false, api: false };
+
+/** チャットログに「コピー用プロンプト」を折りたたみ表示する */
+function logCopyPrompt(prompt) {
+  const log = document.getElementById('chat-log');
+  const el = document.createElement('div');
+  el.className = 'msg msg-ai';
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  el.innerHTML = '<details open><summary>📋 コピーしたプロンプト(クリックで折りたたみ)</summary>' +
+    `<pre>${esc(prompt)}</pre></details>`;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+  return el;
+}
+
+/** コピペモード/API モードの切替。初回切替時のみガイドメッセージをチャットログに流す */
+function setChatMode(mode) {
+  chatMode = mode;
+  document.querySelectorAll('.mode-btn').forEach((btn) =>
+    btn.classList.toggle('mode-btn-active', btn.dataset.mode === mode));
+  document.getElementById('paste-back').classList.toggle('hidden', mode !== 'copy');
+  document.getElementById('btn-send').textContent =
+    mode === 'copy' ? 'プロンプトをコピー' : '送信';
+
+  if (modeGuideShown[mode]) return;
+  modeGuideShown[mode] = true;
+  if (mode === 'copy') {
+    logChat('sys',
+      '📋 コピペモード: ChatGPT / Claude など、お好きな LLM と手動でやりとりできます(Gemini 限定ではありません)。\n' +
+      '① 下の入力欄に指示を書いて「プロンプトをコピー」を押す(クリップボードにコピーされます)。\n' +
+      '② コピーした内容を外部チャットに貼り付けて送信する。\n' +
+      '③ 返ってきた回答(コードを含む全文)を下の「外部チャットの回答を貼り付け」欄に貼り付け、' +
+      '「貼り付けを実行」を押すとこのシーンに反映されます。');
+  } else {
+    logChat('sys',
+      '🔌 API モード: 設定タブに登録した Gemini API キーを使い、指示の送信からコード実行まで自動で行います。');
+  }
+}
+
+/** コピペモードの送信フロー: プロンプトを組み立ててクリップボードにコピーし、ログに残す */
+async function handleChatCopy(userText) {
+  logChat('user', userText);
+  const prompt = buildSystemPrompt() + '\n\n# 指示\n' + userText;
+
+  try {
+    await navigator.clipboard.writeText(prompt);
+    logChat('sys', '✅ プロンプトをクリップボードにコピーしました。外部チャットに貼り付けて送信してください。');
+  } catch (_) {
+    logChat('sys', '⚠ クリップボードへのコピーに失敗しました。下に表示したプロンプトを手動で選択してコピーしてください。');
+  }
+  logCopyPrompt(prompt);
+}
+
+/** コピペモードの「貼り付けを実行」: 貼り付けたテキストからコードを抽出して実行する */
+function handlePasteRun() {
+  const pasteInput = document.getElementById('paste-input');
+  const text = pasteInput.value.trim();
+  if (!text) return;
+  logChat('ai', text);
+  const code = extractCode(text);
+  const ok = runUserCode(code);
+  if (ok) pasteInput.value = '';
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -544,7 +616,12 @@ function initUI() {
     });
   });
 
-  // チャット送信
+  // チャットモード切替(コピペ / API)
+  document.querySelectorAll('.mode-btn').forEach((btn) => {
+    btn.addEventListener('click', () => setChatMode(btn.dataset.mode));
+  });
+
+  // チャット送信(モードに応じて分岐)
   const chatForm = document.getElementById('chat-form');
   const chatInput = document.getElementById('chat-input');
   chatForm.addEventListener('submit', (e) => {
@@ -552,7 +629,11 @@ function initUI() {
     const text = chatInput.value.trim();
     if (!text) return;
     chatInput.value = '';
-    handleChatSend(text);
+    if (chatMode === 'api') {
+      handleChatSend(text);
+    } else {
+      handleChatCopy(text);
+    }
   });
   // Ctrl/Cmd+Enter で送信
   chatInput.addEventListener('keydown', (e) => {
@@ -561,6 +642,9 @@ function initUI() {
       chatForm.requestSubmit();
     }
   });
+
+  // コピペモード: 外部チャットの回答を貼り付けて実行
+  document.getElementById('btn-paste-run').addEventListener('click', handlePasteRun);
 
   // コード直接入力
   const codeInput = document.getElementById('code-input');
@@ -629,7 +713,8 @@ function main() {
   initDragAndDrop();
   initUI();
   updateBadges();
-  logChat('sys', 'ようこそ。指示だけでゼロから生成、または STL を D&D して編集できます。');
+  logChat('sys', 'ようこそ。指示だけでゼロから生成、または STL/3MF を D&D して編集できます。');
+  setChatMode('copy');
 }
 
 main();

@@ -77,23 +77,39 @@
         </div>
       </header>
 
-      <!-- タブ切替: チャット(Gemini) / コード直接入力 -->
+      <!-- タブ切替: チャット / コード直接入力 -->
       <nav id="tabs" role="tablist">
-        <button class="tab tab-active" data-tab="chat" role="tab">チャット (Gemini)</button>
+        <button class="tab tab-active" data-tab="chat" role="tab">チャット</button>
         <button class="tab" data-tab="code" role="tab">コード直接入力</button>
         <button class="tab" data-tab="settings" role="tab">設定</button>
       </nav>
 
-      <!-- タブ: チャット -->
+      <!-- タブ: チャット。LLMとのやりとりは「コピペモード」「APIモード」の2種類 -->
       <div class="tab-panel tab-panel-active" data-panel="chat">
+        <div id="chat-mode-toggle" class="mode-toggle" role="tablist">
+          <button class="mode-btn mode-btn-active" data-mode="copy" type="button">📋 コピペモード</button>
+          <button class="mode-btn" data-mode="api" type="button">🔌 API モード</button>
+        </div>
+
         <div id="chat-log" aria-live="polite"></div>
+
         <form id="chat-form">
           <textarea id="chat-input" rows="3"
             placeholder="例: 一辺 40mm の立方体の中心に直径 20mm の貫通穴をあけて"></textarea>
           <div class="row-end">
-            <button type="submit" id="btn-send" class="btn btn-primary">送信</button>
+            <button type="submit" id="btn-send" class="btn btn-primary">プロンプトをコピー</button>
           </div>
         </form>
+
+        <!-- コピペモード専用: 外部チャット(ChatGPT/Gemini等)の回答を貼り付けて実行 -->
+        <div id="paste-back" class="paste-back">
+          <label class="paste-back-label" for="paste-input">③ 外部チャットの回答を貼り付け</label>
+          <textarea id="paste-input" rows="4"
+            placeholder="LLM の回答(コードを含む全文)をここに貼り付け"></textarea>
+          <div class="row-end">
+            <button id="btn-paste-run" class="btn btn-primary" type="button">貼り付けを実行</button>
+          </div>
+        </div>
       </div>
 
       <!-- タブ: コード直接入力(Gemini 不使用) -->
@@ -188,7 +204,7 @@
       sitesJsonPath: 'config/subutomo-sites.json',
       logoPath: './common/assets/logo.png',
       theme: 'dark-bg',
-      version: '0.2.0',
+      version: '0.3.0',
       privacy: { localStorage: true, analytics: false },
       onSecretAction: null
     };

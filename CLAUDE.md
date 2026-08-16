@@ -6,9 +6,13 @@ Chat 3D は、ブラウザだけで完結する「テキスト指示 / コード
 Subutomo Dev のツール系サイト群の一員として、共有フッター/バッジ/favicon を踏襲する。
 
 対応ユースケース:
-1. **STL 編集モード** — STL を D&D 読み込みし、チャット指示で CSG 加工する。
+1. **STL 編集モード** — STL/3MF を D&D 読み込みし、チャット指示で CSG 加工する。
 2. **ゼロベース生成モード** — 空シーンから、チャット指示のみで基本図形 + CSG で生成する。
 3. **マニュアルコード実行モード** — 外部 LLM で作った JS を貼り付けて実行する。
+
+チャットでの LLM とのやりとりは **コピペモード**(Gemini に限らず任意の LLM と手動で
+コピペ、既定)/ **API モード**(Gemini API を直接呼び出し)の 2 種類から選べる。
+詳細は `docs/architecture.md` の「チャットの 2 モード」を参照。
 
 ## 技術スタック
 - UI/構成: HTML5 / CSS3 / Vanilla JavaScript(ES Modules)
@@ -20,6 +24,8 @@ Subutomo Dev のツール系サイト群の一員として、共有フッター/
 - `index.html` — エントリ。UI 骨格 / importmap / フッター / バッジ。
 - `main.js` — 中核ロジック(Three.js / STL 入出力 / 動的実行エンジン / Gemini)。
 - `style.css` — レイアウトとダークテーマ。
+- `vendor/` — 上流ライブラリのバグ修正のためにローカルへ持ち込んだ改変版
+  (現状: `3MFLoader.js`。ライセンス表記と改変理由をファイル冒頭コメントに残すこと)。
 - `assets/` — favicon 一式と `subutomo-badge.js`(spctrl-site から踏襲・複製)。
 - `common/assets/logo.png` — バッジ用ロゴ(同上)。
 - `config/subutomo-sites.json` — サイト台帳(バッジのリンク元。正本はテンプレ側)。
