@@ -36,7 +36,19 @@
           <div class="exec-spinner" aria-hidden="true"></div>
           <div class="exec-title">実行中…</div>
           <div id="exec-note" class="exec-note"></div>
-          <div class="exec-warn">計算中はブラウザの操作を受け付けません。<br>そのままお待ちください。</div>
+          <div id="exec-warn" class="exec-warn">計算中はブラウザの操作を受け付けません。<br>そのままお待ちください。</div>
+        </div>
+      </div>
+
+      <!-- 重い処理の実行前ガード。規模が大きいときだけ表示する -->
+      <div id="confirm-overlay" class="hidden">
+        <div class="confirm-card">
+          <div id="confirm-title" class="confirm-title"></div>
+          <div id="confirm-body" class="confirm-body"></div>
+          <div class="confirm-actions">
+            <button id="btn-confirm-cancel" class="btn" type="button">やめる</button>
+            <button id="btn-confirm-go" class="btn btn-warn" type="button">それでも実行する</button>
+          </div>
         </div>
       </div>
 
@@ -383,7 +395,7 @@
       sitesJsonPath: 'config/subutomo-sites.json',
       logoPath: './common/assets/logo.png',
       theme: 'dark-bg',
-      version: '0.5.0',
+      version: '0.6.0',
       privacy: { localStorage: true, analytics: false },
       onSecretAction: null
     };

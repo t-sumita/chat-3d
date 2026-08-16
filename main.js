@@ -22,6 +22,8 @@ const LS_KEY = 'chat3d.settings.v1';          // localStorage キー
 const MODEL_COLOR = 0x9ec5ff;                  // 生成メッシュの既定色
 const EXEC_HISTORY_MAX = 20;                   // 所要時間の推定に使う実行履歴の保持件数
 const UNDO_MAX = 12;                           // undo 履歴の保持段数(ジオメトリ実体を持つため控えめ)
+const TRI_WARN = 20000;                        // これを超えたら「重い処理」として強い警告を出す
+const TRI_CONFIRM = 60000;                     // これを超えたら実行前に明示的な確認を求める
 const WELD_PRECISION = 1e4;                    // パーツ分割時に頂点を同一視する量子化精度
 const TEXT_FONT_URL =                          // テキスト生成用フォント(半角英数のみ)
   'https://unpkg.com/three@0.160.0/examples/fonts/helvetiker_regular.typeface.json';
@@ -325,8 +327,8 @@ function updateHistoryButtons() {
  * 重い同期処理をオーバーレイ付きで実行する。
  * 実行前に1フレーム描画を挟み、「固まった」という誤認を防ぐ。
  */
-async function withBusy(note, fn) {
-  setExecOverlay(true, note);
+async function withBusy(note, fn, heavy) {
+  setExecOverlay(true, note, heavy);
   await nextPaint();
   try {
     return fn();
@@ -423,11 +425,14 @@ function csgOp(op, a, b) {
 /** 指定ジオメトリを targetMesh から削る(target が無ければ何もしない) */
 async function subtractShape(mesh, note) {
   if (!requireMesh()) return;
-  await withBusy(note, () => {
+  // 消しゴムもここを通る。CSG は規模に応じて急激に重くなるため必ずガードする
+  const pre = await preflight(triangleCount(targetMesh), '削り取り');
+  if (!pre.ok) { disposeMesh(mesh); return; }
+  await withBusy(`${note}${pre.note ? ` (${pre.note})` : ''}`, () => {
     const g = csgOp('subtract', targetMesh, mesh);
     disposeMesh(mesh);
     commitGeometry(g);
-  });
+  }, pre.heavy);
 }
 
 /** 指定ジオメトリを targetMesh に結合する(target が無ければそのまま採用) */
@@ -440,11 +445,13 @@ async function unionShape(mesh, note) {
     frameObject(targetMesh);
     return;
   }
-  await withBusy(note, () => {
+  const pre = await preflight(triangleCount(targetMesh), '結合');
+  if (!pre.ok) { disposeMesh(mesh); return; }
+  await withBusy(`${note}${pre.note ? ` (${pre.note})` : ''}`, () => {
     const g = csgOp('union', targetMesh, mesh);
     disposeMesh(mesh);
     commitGeometry(g);
-  });
+  }, pre.heavy);
 }
 
 // ── パーツ分割(連結成分の自動認識)──
@@ -928,11 +935,91 @@ function formatMs(ms) {
   return ms < 1000 ? `${Math.round(ms)} ミリ秒` : `${(ms / 1000).toFixed(1)} 秒`;
 }
 
-/** 実行中オーバーレイの表示/非表示。note は推定所要時間などの補足 */
-function setExecOverlay(visible, note) {
+/**
+ * 実行中オーバーレイの表示/非表示。
+ * @param {boolean} visible 表示するか
+ * @param {string} [note] 推定所要時間などの補足
+ * @param {boolean} [heavy] 重い処理なら、待たされる可能性の警告を強める
+ */
+function setExecOverlay(visible, note, heavy) {
   const ov = document.getElementById('exec-overlay');
   document.getElementById('exec-note').textContent = note || '';
+  const warn = document.getElementById('exec-warn');
+  if (warn) {
+    warn.innerHTML = heavy
+      ? '計算中はブラウザの操作を受け付けず、<b>中止もできません</b>。<br>' +
+        'ブラウザが「応答しません」と表示したら<br><b>「待機」を選べば処理は続きます</b>。<br>' +
+        '規模によっては数分かかり、失敗することもあります。'
+      : '計算中はブラウザの操作を受け付けません。<br>そのままお待ちください。';
+    warn.classList.toggle('exec-warn-strong', !!heavy);
+  }
   ov.classList.toggle('hidden', !visible);
+}
+
+/**
+ * 確認ダイアログを出して、ユーザーの選択を待つ。
+ * window.confirm と違い、テーマに合わせた表示と HTML 本文が使える。
+ * @returns {Promise<boolean>} 「それでも実行する」なら true
+ */
+function askConfirm(title, bodyHtml) {
+  return new Promise((resolve) => {
+    const ov = document.getElementById('confirm-overlay');
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-body').innerHTML = bodyHtml;
+    const go = document.getElementById('btn-confirm-go');
+    const no = document.getElementById('btn-confirm-cancel');
+
+    const done = (v) => {
+      ov.classList.add('hidden');
+      go.removeEventListener('click', onGo);
+      no.removeEventListener('click', onNo);
+      document.removeEventListener('keydown', onKey);
+      resolve(v);
+    };
+    const onGo = () => done(true);
+    const onNo = () => done(false);
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); done(false); } };
+
+    go.addEventListener('click', onGo);
+    no.addEventListener('click', onNo);
+    document.addEventListener('keydown', onKey);
+    ov.classList.remove('hidden');
+    no.focus();                       // 既定は「やめる」。誤爆で重い処理に入らせない
+  });
+}
+
+/**
+ * 重い処理の実行前ガード。
+ * 三角形数から規模を判定し、危険域なら実行前に確認を求める。
+ * CSG は同期処理で中止できないため、「止められないことを始める前」が
+ * ユーザーに選択肢を出せる唯一のタイミングになる。
+ * @param {number} tris 入力メッシュの三角形数
+ * @param {string} opLabel 処理名(ダイアログのタイトルに使う)
+ * @returns {Promise<{ok:boolean, est:number|null, heavy:boolean, note:string}>}
+ */
+async function preflight(tris, opLabel) {
+  const est = estimateRunTime(tris);
+  const heavy = tris >= TRI_WARN;
+
+  const noteParts = [];
+  if (tris > 0) noteParts.push(`対象 ${tris.toLocaleString()} 三角形`);
+  if (est !== null) noteParts.push(`推定 約${formatMs(est)}(過去の実測より)`);
+  const note = noteParts.join(' / ');
+
+  // 危険域でなければ、そのまま進む(注意はオーバーレイ側で出す)
+  if (tris < TRI_CONFIRM) return { ok: true, est, heavy, note };
+
+  const lines = [
+    `対象は <b>${tris.toLocaleString()} 三角形</b>あります。`,
+    est !== null
+      ? `過去の実測から <b>約${formatMs(est)}</b> かかる見込みです。`
+      : '近い規模の実測データが無いため、所要時間は予測できません。',
+    '<b>数分かかることがあり、ブラウザがタブを強制終了して作業が失われる場合があります。</b>',
+    '計算中は中止できません。「応答しません」と出たら<b>「待機」</b>を選んでください。',
+    '先に「STL 保存」でバックアップしておくことを強くおすすめします。',
+  ];
+  const ok = await askConfirm(`⚠ ${opLabel}: 時間がかかります`, lines.join('<br>'));
+  return { ok, est, heavy, note };
 }
 
 /** ブラウザに1フレーム描画させてから次に進む(オーバーレイを確実に見せるため) */
@@ -956,13 +1043,13 @@ async function runUserCode(code) {
     return false;
   }
 
-  // 実行前に規模から所要時間を見積もり、オーバーレイに出す
+  // 実行前ガード。規模が大きければ、始める前に確認を取る
   const inTris = triangleCount(targetMesh);
-  const est = estimateRunTime(inTris);
-  const note = est !== null
-    ? `推定 約${formatMs(est)}(過去の実測より)`
-    : (inTris > 0 ? `対象 ${inTris.toLocaleString()} 三角形` : '');
-  setExecOverlay(true, note);
+  const pre = await preflight(inTris, 'コード実行');
+  if (!pre.ok) return false;
+  const est = pre.est;
+
+  setExecOverlay(true, pre.note, pre.heavy);
   await nextPaint();               // ← ここでオーバーレイが実際に描画される
 
   let result = null;
@@ -1033,13 +1120,28 @@ function showDebugReport({ ok, elapsed, inTris, outTris, logs, est }) {
     estText = `約${formatMs(est)}` + (off >= 2 ? '(実測と乖離)' : '');
   }
 
+  // CSG は結果の三角形数を増やす。増分を明示しないと
+  // 「1回目は成功したのに2回目で固まる」理由がユーザーに分からない
+  let outText = outTris > 0 ? `${outTris.toLocaleString()} 三角形` : '—';
+  if (outTris > 0 && inTris > 0 && outTris !== inTris) {
+    const d = outTris - inTris;
+    const pct = Math.round((d / inTris) * 100);
+    outText += d > 0
+      ? ` <span class="dbg-grow">(+${d.toLocaleString()} / +${pct}%)</span>`
+      : ` (${d.toLocaleString()} / ${pct}%)`;
+  }
+
   const rows = [
     ['結果', ok ? '✅ 反映しました' : '⚠ 反映できませんでした'],
     ['所要時間', formatMs(elapsed)],
     ['事前推定', estText],
     ['入力メッシュ', inTris > 0 ? `${inTris.toLocaleString()} 三角形` : 'なし(ゼロベース)'],
-    ['出力メッシュ', outTris > 0 ? `${outTris.toLocaleString()} 三角形` : '—'],
+    ['出力メッシュ', outText],
   ];
+  if (outTris >= TRI_WARN) {
+    rows.push(['⚠ 次の実行', `この ${outTris.toLocaleString()} 三角形が次回の入力になります。` +
+      `続けて加工すると、さらに時間がかかります。区切りで「STL 保存」をおすすめします。`]);
+  }
   stats.innerHTML = rows.map(([k, v]) =>
     `<dt>${k}</dt><dd${k === '所要時間' && elapsed >= 5000 ? ' class="dbg-slow"' : ''}>${v}</dd>`
   ).join('');

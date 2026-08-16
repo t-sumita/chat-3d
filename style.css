@@ -104,6 +104,43 @@ html, body {
 .exec-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
 .exec-note { font-size: 12px; color: var(--accent); margin-bottom: 8px; min-height: 1em; }
 .exec-warn { font-size: 11px; color: var(--muted); line-height: 1.6; }
+/* 重い処理のときは、待たされる可能性をはっきり伝える */
+.exec-warn-strong { color: var(--accent-2); }
+
+/* ── 実行前ガードの確認ダイアログ ── */
+#confirm-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;                     /* 実行中オーバーレイ(20)より上 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 12, 18, 0.8);
+  padding: 16px;
+}
+.confirm-card {
+  max-width: 380px;
+  padding: 20px 22px;
+  border: 1px solid var(--accent-2);
+  border-radius: var(--radius);
+  background: rgba(24, 27, 37, 0.98);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
+.confirm-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-2);
+  margin-bottom: 10px;
+}
+.confirm-body {
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--text);
+  margin-bottom: 16px;
+}
+.confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.btn-warn { border-color: var(--accent-2); color: var(--accent-2); }
+.btn-warn:hover { background: rgba(230, 126, 34, 0.16); }
 
 /* 左上: タイトル + 補足説明 + モード/メッシュバッジ(縦積み) */
 #viewport-topleft {
@@ -433,6 +470,7 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 #debug-stats dt { color: var(--muted); white-space: nowrap; }
 #debug-stats dd { margin: 0; font-family: var(--mono); }
 #debug-stats .dbg-slow { color: var(--accent-2); }
+#debug-stats .dbg-grow { color: var(--accent-2); }
 #debug-log {
   margin: 8px 0 0;
   padding: 8px;
