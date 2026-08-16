@@ -32,6 +32,33 @@ Chat 3D は「UI 骨格(index.html)」「中核ロジック(main.js)」「テー
   - `setResult(mesh)` 優先、無ければ `return` 値をメッシュとして採用。
   - 例外は `showError()` で UI にスタックトレースを表示（握りつぶさない）。
 
+### 実行中の進捗表示（重要な制約）
+CSG は**同期処理でメインスレッドを占有する**ため、実行中に JS から進捗を更新することは
+原理的にできない（真のパーセンテージ表示は不可能）。そのため次の構成にしている。
+
+- `runUserCode()` は `async` 化し、`setExecOverlay(true)` → `await nextPaint()`
+  （二重 `requestAnimationFrame`）で**オーバーレイを確実に描画してから**ブロッキング処理に入る。
+- `.exec-spinner` は `transform` アニメーション。transform/opacity のアニメーションは
+  コンポジタスレッドで処理されるため、**メインスレッドがブロック中でも回り続ける**。
+  これが「フリーズした」という誤認を防ぐ主要な仕掛け。
+- 所要時間は `performance.now()` で実測し、`recordRunTime()` が
+  `settings.execHistory`（直近 `EXEC_HISTORY_MAX` 件、localStorage）へ記録する。
+- `estimateRunTime(tris)` は履歴から「1 三角形あたりの実測コスト」を平均して推定する。
+  履歴が無い / 規模が 10 倍以上離れている場合は **`null` を返して推定を出さない**
+  （根拠のない数字を見せないため）。
+- 実行後は `showDebugReport()` が所要時間・入出力の三角形数・推定との乖離・
+  実行コード内の `console.log/warn/error` 出力を「実行レポート」欄に表示する。
+  console は実行中だけ差し替え、`finally` で必ず復元する。
+
+## 指示のヒント（`INSTRUCTION_TEMPLATES` / `INSTRUCTION_LIMITS`）
+LLM は読み込んだ形状を見ていないため、指示できる範囲には原理的な制約がある。
+チャットタブの「指示のヒント」欄で、成立する指示をクリック引用できるようにしつつ、
+成立しない指示（フィレット・シェル化・部位指定など）を理由付きで併記して期待値を揃える。
+- 成立する指示＝**全体変形 / bbox 基準 / パラメトリックなパターン / 座標指定**。
+  いずれも「原点中心・mm 単位」という前提のみで書けるため、形状を知らなくても正確。
+- 形を指し示す指示は通らないので、寸法と座標で伝える。**3D ビューを見て判断するのは
+  ユーザーの役割**、という分担がこのツールの前提。
+
 ## 3MF 読み込み
 - `ThreeMFLoader.parse(buffer)` はシーンに追加していない `THREE.Group` を同期的に返す。
 - `group.updateMatrixWorld(true)` を呼んでから各 `Mesh` を走査し、`position` 属性(と

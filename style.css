@@ -67,6 +67,44 @@ html, body {
 .drop-icon { font-size: 34px; opacity: 0.5; }
 .drop-sub { font-size: 12px; opacity: 0.7; }
 
+/* ── 実行中オーバーレイ ──
+   CSG は同期処理でメインスレッドを占有するため、実行中に JS で画面を更新できない。
+   スピナーを transform アニメーション(コンポジタスレッドで処理される)にすることで、
+   メインスレッドがブロック中でも回り続け、フリーズとの誤認を防ぐ。 */
+#exec-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 12, 18, 0.72);
+}
+.exec-card {
+  text-align: center;
+  padding: 22px 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(24, 27, 37, 0.96);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  max-width: 300px;
+}
+.exec-spinner {
+  width: 34px;
+  height: 34px;
+  margin: 0 auto 12px;
+  border: 3px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  /* will-change でレイヤーを昇格させ、確実にコンポジタ側で回す */
+  will-change: transform;
+  animation: exec-spin 0.9s linear infinite;
+}
+@keyframes exec-spin { to { transform: rotate(360deg); } }
+.exec-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+.exec-note { font-size: 12px; color: var(--accent); margin-bottom: 8px; min-height: 1em; }
+.exec-warn { font-size: 11px; color: var(--muted); line-height: 1.6; }
+
 /* 左上: タイトル + 補足説明 + モード/メッシュバッジ(縦積み) */
 #viewport-topleft {
   position: absolute;
@@ -153,6 +191,7 @@ html, body {
 #info-panel ul { margin: 0 0 8px; padding-left: 18px; }
 #info-panel li { margin-bottom: 4px; }
 #info-panel code { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+.info-h { font-weight: 700; color: var(--accent); margin: 12px 0 5px !important; }
 .info-note { color: #ffd39b; font-size: 11.5px; }
 
 /* ── 操作パネル ── */
@@ -238,6 +277,47 @@ html, body {
 .paste-back { flex: 0 0 auto; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
 .paste-back-label { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 6px; }
 
+/* ── 指示のヒント(クリックで入力欄へ引用) ── */
+#hint-lib { flex: 0 0 auto; margin-bottom: 10px; font-size: 12px; }
+#hint-lib > summary { cursor: pointer; color: var(--accent); padding: 4px 0; }
+#hint-lib-body { max-height: 34vh; overflow-y: auto; padding: 6px 2px 2px; }
+.hint-group { margin-bottom: 10px; }
+.hint-group-title { font-size: 11px; color: var(--muted); margin-bottom: 5px; }
+.hint-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.hint-chip {
+  font-family: var(--font);
+  font-size: 11.5px;
+  line-height: 1.35;
+  text-align: left;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-bg2);
+  color: var(--text);
+  cursor: pointer;
+}
+.hint-chip:hover { border-color: var(--accent); background: rgba(158, 197, 255, 0.14); }
+/* できないこと: 引用不可なので見た目で区別する */
+.hint-no { display: flex; flex-direction: column; gap: 3px; }
+.hint-no li { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.hint-no b { color: #ffb4b4; font-weight: 600; }
+.hint-note { font-size: 11px; color: var(--muted); line-height: 1.5; margin: 6px 0 0; }
+
+/* ── チャットログ内のコピーボタン ── */
+.msg-tools { display: flex; justify-content: flex-end; margin-top: 6px; }
+.btn-copy {
+  font-family: var(--font);
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-bg2);
+  color: var(--text);
+  cursor: pointer;
+}
+.btn-copy:hover { border-color: var(--accent); background: rgba(158, 197, 255, 0.14); }
+.btn-copy.copied { border-color: var(--ok); color: var(--ok); }
+
 /* ── チャット ── */
 #chat-log {
   flex: 1;
@@ -275,7 +355,38 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 #code-input, #sys-prompt { flex: 0 0 auto; }
 
 .row-end { display: flex; justify-content: flex-end; }
-.row-between { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+.row-between { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; gap: 8px; }
+.btn-group { display: flex; gap: 8px; }
+
+/* ── 実行レポート(所要時間・統計・console 出力) ── */
+#debug-box {
+  flex: 0 0 auto;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-bg2);
+}
+.debug-head { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; font-weight: 600; margin-bottom: 8px; }
+.debug-head .btn-x { color: var(--muted); }
+#debug-stats { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 11.5px; margin: 0; }
+#debug-stats dt { color: var(--muted); white-space: nowrap; }
+#debug-stats dd { margin: 0; font-family: var(--mono); }
+#debug-stats .dbg-slow { color: var(--accent-2); }
+#debug-log {
+  margin: 8px 0 0;
+  padding: 8px;
+  max-height: 22vh;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
 
 .hint { font-size: 12px; color: var(--muted); line-height: 1.6; margin: 0 0 10px; }
 .hint code { font-family: var(--mono); color: var(--accent); font-size: 11.5px; }

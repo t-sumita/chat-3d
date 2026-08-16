@@ -18,6 +18,7 @@ import { CSG } from 'three-csg-ts';
 
 const LS_KEY = 'chat3d.settings.v1';          // localStorage キー
 const MODEL_COLOR = 0x9ec5ff;                  // 生成メッシュの既定色
+const EXEC_HISTORY_MAX = 20;                   // 所要時間の推定に使う実行履歴の保持件数
 
 // LLM にコードを書かせるためのシステムプロンプト・テンプレート。
 // 開発者が後から調整しやすいよう、ここに定数として明示的に定義する。
@@ -50,6 +51,56 @@ const DEFAULT_SYSTEM_PROMPT = `あなたは Three.js と three-csg-ts に精通�
 \`\`\`
 
 {{CONTEXT}}`;
+
+// 指示のヒント。LLM は形状を直接見られないため、「形を見なくても成立する指示」＝
+// 全体変形 / bbox 基準 / パラメトリックなパターン / 座標指定 に限って例を出す。
+// クリックでチャット入力欄に引用される。
+const INSTRUCTION_TEMPLATES = [
+  {
+    title: '全体変形(確実に動く)',
+    items: [
+      '全体を 1.2 倍に拡大して',
+      'Z 方向だけ 1.5 倍に引き伸ばして',
+      'X 軸まわりに 90 度回転して',
+      '左右反転(ミラー)して',
+    ],
+  },
+  {
+    title: 'bbox 基準の加工(ほぼ確実)',
+    items: [
+      '中心に直径 20mm の貫通穴をあけて',
+      '上面の中央に直径 10mm・深さ 5mm のザグリを入れて',
+      'Z=0 の平面で切って、上半分だけ残して',
+      '底面に厚さ 3mm・一回り大きい台座を追加して',
+      '一辺 50mm の立方体で intersect して、はみ出しを削って',
+    ],
+  },
+  {
+    title: 'パターン(確実に動く)',
+    items: [
+      '中心から半径 25mm の円周上に、直径 5mm の穴を 6 個等間隔であけて',
+      '10mm ピッチの格子状に直径 3mm の穴を並べて',
+      '側面に幅 2mm のリブを 4 本、90 度おきに追加して',
+    ],
+  },
+  {
+    title: '座標を指定して追加・削除(確実に動く)',
+    items: [
+      '(15, 0, 20) に直径 8mm・高さ 10mm の円柱を生やして',
+      '(0, 10, 0) を中心に一辺 12mm の立方体を引いて',
+    ],
+  },
+];
+
+// LLM は読み込んだ形状を「見て」いないため、原理的に指示できないこと。
+// 期待値をあらかじめ揃えるために UI 上で明示する。
+const INSTRUCTION_LIMITS = [
+  { what: 'この突起を削除して', why: '形状認識の仕組みが無く、部分を指し示せない' },
+  { what: '角を丸めて(フィレット)', why: 'three-csg-ts にフィレット機能が無い' },
+  { what: '肉厚 2mm でシェル化して', why: 'オフセット形状の生成に対応していない' },
+  { what: '一番大きい面に穴を', why: '面を認識・選択できない' },
+  { what: '元の形に合わせていい感じに', why: '元形状が見えないので「合わせる」判断ができない' },
+];
 
 // コード直接入力タブに最初から入れておくサンプル(Box ∪ Sphere)。
 const SAMPLE_CODE = `// Box と Sphere を結合(union)して1つのメッシュにする例
@@ -344,44 +395,170 @@ function extractCode(text) {
   return (fenced ? fenced[1] : text).trim();
 }
 
+/** メッシュの三角形数を返す(index があればそちらを優先) */
+function triangleCount(mesh) {
+  const g = mesh && mesh.geometry;
+  if (!g) return 0;
+  if (g.index) return Math.floor(g.index.count / 3);
+  const pos = g.getAttribute('position');
+  return pos ? Math.floor(pos.count / 3) : 0;
+}
+
+/**
+ * 過去の実行実績(三角形数 → 所要 ms)から所要時間を見積もる。
+ * 実測ベースなので、履歴が無い/規模が違いすぎる場合は null を返す(推測しない)。
+ * @returns {number|null} 推定ミリ秒
+ */
+function estimateRunTime(tris) {
+  const hist = settings.execHistory || [];
+  if (!hist.length || tris <= 0) return null;
+  // 三角形数が近い順に最大3件を採り、1三角形あたりの実測コストを平均する
+  const near = hist
+    .filter((h) => h.tris > 0)
+    .sort((a, b) => Math.abs(a.tris - tris) - Math.abs(b.tris - tris))
+    .slice(0, 3);
+  if (!near.length) return null;
+  const closest = near[0];
+  // 規模が10倍以上離れていたら外挿の信頼性が無いので出さない
+  const ratio = Math.max(closest.tris, tris) / Math.min(closest.tris, tris);
+  if (ratio > 10) return null;
+  const perTri = near.reduce((s, h) => s + h.ms / h.tris, 0) / near.length;
+  return perTri * tris;
+}
+
+/** 実行実績を localStorage に記録する(直近 EXEC_HISTORY_MAX 件) */
+function recordRunTime(tris, ms) {
+  if (tris <= 0) return;
+  const hist = settings.execHistory || [];
+  hist.push({ tris, ms });
+  settings.execHistory = hist.slice(-EXEC_HISTORY_MAX);
+  saveSettings();
+}
+
+/** 所要時間を人間向けに整形する */
+function formatMs(ms) {
+  return ms < 1000 ? `${Math.round(ms)} ミリ秒` : `${(ms / 1000).toFixed(1)} 秒`;
+}
+
+/** 実行中オーバーレイの表示/非表示。note は推定所要時間などの補足 */
+function setExecOverlay(visible, note) {
+  const ov = document.getElementById('exec-overlay');
+  document.getElementById('exec-note').textContent = note || '';
+  ov.classList.toggle('hidden', !visible);
+}
+
+/** ブラウザに1フレーム描画させてから次に進む(オーバーレイを確実に見せるため) */
+function nextPaint() {
+  return new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
 /**
  * 抽出済み JS を new Function で実行し、結果メッシュでシーンを更新する。
  * scene / THREE / CSG / targetMesh / setResult を引数として渡す。
- * @returns {boolean} 成功したか
+ *
+ * CSG は同期処理でメインスレッドを占有するため、実行中の進捗更新はできない。
+ * そのため「実行前にオーバーレイを描画 → 実行 → 実測値を報告」という形にしている。
+ * @returns {Promise<boolean>} 成功したか
  */
-function runUserCode(code) {
+async function runUserCode(code) {
   clearError();
   if (!code) {
     showError(new Error('実行するコードがありません'), 'コードが空です');
     return false;
   }
 
+  // 実行前に規模から所要時間を見積もり、オーバーレイに出す
+  const inTris = triangleCount(targetMesh);
+  const est = estimateRunTime(inTris);
+  const note = est !== null
+    ? `推定 約${formatMs(est)}(過去の実測より)`
+    : (inTris > 0 ? `対象 ${inTris.toLocaleString()} 三角形` : '');
+  setExecOverlay(true, note);
+  await nextPaint();               // ← ここでオーバーレイが実際に描画される
+
   let result = null;
   const setResult = (mesh) => { result = mesh; };
 
+  // 実行コード内の console 出力を拾ってデバッグ欄に出す
+  const logs = [];
+  const orig = { log: console.log, warn: console.warn, error: console.error };
+  const cap = (level) => (...args) => {
+    logs.push(`[${level}] ` + args.map((a) => {
+      if (typeof a === 'string') return a;
+      try { return JSON.stringify(a); } catch (_) { return String(a); }
+    }).join(' '));
+    orig[level].apply(console, args);
+  };
+  console.log = cap('log'); console.warn = cap('warn'); console.error = cap('error');
+
+  const t0 = performance.now();
+  let elapsed = 0;
   try {
     // 'use strict' を付けて、暗黙のグローバル汚染を防ぐ
     const fn = new Function(
       'scene', 'THREE', 'CSG', 'targetMesh', 'setResult',
       '"use strict";\n' + code);
     const ret = fn(scene, THREE, CSG, targetMesh, setResult);
+    elapsed = performance.now() - t0;
 
     // setResult 優先。無ければ return 値をメッシュとして扱う
     const mesh = result || ret;
     if (mesh && mesh.isMesh) {
       setTargetMesh(mesh);
+      recordRunTime(inTris || triangleCount(mesh), elapsed);
+      showDebugReport({ ok: true, elapsed, inTris, outTris: triangleCount(mesh), logs, est });
       return true;
     }
     // メッシュが返らなかった: scene 直接操作とみなし、警告のみ
+    showDebugReport({ ok: false, elapsed, inTris, outTris: 0, logs, est });
     showError(
       new Error('setResult(mesh) が呼ばれず、メッシュも return されませんでした。\n' +
         '完成メッシュを setResult(...) で登録してください。'),
       'メッシュを取得できませんでした');
     return false;
   } catch (err) {
+    elapsed = performance.now() - t0;
+    showDebugReport({ ok: false, elapsed, inTris, outTris: 0, logs, est });
     showError(err, '実行時エラー');
     return false;
+  } finally {
+    console.log = orig.log; console.warn = orig.warn; console.error = orig.error;
+    setExecOverlay(false);
   }
+}
+
+/** 実行レポート(所要時間・三角形数・console 出力)をデバッグ欄に表示する */
+function showDebugReport({ ok, elapsed, inTris, outTris, logs, est }) {
+  const box = document.getElementById('debug-box');
+  const stats = document.getElementById('debug-stats');
+  const logEl = document.getElementById('debug-log');
+
+  // 推定と実測が2倍以上ずれたら、その旨も添える(見積りを過信させない)
+  let estText = '—';
+  if (est !== null) {
+    const off = Math.max(est, elapsed) / Math.max(1, Math.min(est, elapsed));
+    estText = `約${formatMs(est)}` + (off >= 2 ? '(実測と乖離)' : '');
+  }
+
+  const rows = [
+    ['結果', ok ? '✅ 反映しました' : '⚠ 反映できませんでした'],
+    ['所要時間', formatMs(elapsed)],
+    ['事前推定', estText],
+    ['入力メッシュ', inTris > 0 ? `${inTris.toLocaleString()} 三角形` : 'なし(ゼロベース)'],
+    ['出力メッシュ', outTris > 0 ? `${outTris.toLocaleString()} 三角形` : '—'],
+  ];
+  stats.innerHTML = rows.map(([k, v]) =>
+    `<dt>${k}</dt><dd${k === '所要時間' && elapsed >= 5000 ? ' class="dbg-slow"' : ''}>${v}</dd>`
+  ).join('');
+
+  if (logs.length) {
+    logEl.textContent = logs.join('\n');
+    logEl.classList.remove('hidden');
+  } else {
+    logEl.classList.add('hidden');
+  }
+  box.classList.remove('hidden');
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -476,7 +653,7 @@ async function handleChatSend(userText) {
     thinking.remove();
     logChat('ai', reply);
     const code = extractCode(reply);
-    runUserCode(code);
+    await runUserCode(code);
   } catch (err) {
     thinking.remove();
     showError(err, 'Gemini 連携エラー');
@@ -520,14 +697,36 @@ function renderAiText(text) {
 let chatMode = 'copy';
 const modeGuideShown = { copy: false, api: false };
 
-/** チャットログに「コピー用プロンプト」を折りたたみ表示する */
+/**
+ * チャットログに「コピー用プロンプト」を折りたたみ + ワンクリックコピーで表示する。
+ * 一度コピーに失敗した場合や、後から再送したい場合にここから何度でもコピーできる。
+ */
 function logCopyPrompt(prompt) {
   const log = document.getElementById('chat-log');
   const el = document.createElement('div');
   el.className = 'msg msg-ai';
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  el.innerHTML = '<details open><summary>📋 コピーしたプロンプト(クリックで折りたたみ)</summary>' +
-    `<pre>${esc(prompt)}</pre></details>`;
+  el.innerHTML =
+    '<details open><summary>📋 送信用プロンプト(クリックで折りたたみ)</summary>' +
+    `<pre>${esc(prompt)}</pre></details>` +
+    '<div class="msg-tools"><button class="btn-copy" type="button">📋 コピー</button></div>';
+
+  // ワンクリックコピー。成否をボタン自身のラベルで即座にフィードバックする
+  const btn = el.querySelector('.btn-copy');
+  btn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      btn.textContent = '✅ コピーしました';
+      btn.classList.add('copied');
+    } catch (_) {
+      btn.textContent = '⚠ コピー失敗(手動で選択してください)';
+    }
+    setTimeout(() => {
+      btn.textContent = '📋 コピー';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+
   log.appendChild(el);
   log.scrollTop = log.scrollHeight;
   return el;
@@ -557,6 +756,45 @@ function setChatMode(mode) {
   }
 }
 
+/**
+ * 指示のヒント欄を生成する。テンプレートはクリックで入力欄に引用でき、
+ * 「できないこと」は引用不可の情報として併記して期待値を先に揃える。
+ */
+function initHintLibrary() {
+  const body = document.getElementById('hint-lib-body');
+  const chatInput = document.getElementById('chat-input');
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const groups = INSTRUCTION_TEMPLATES.map((g) =>
+    `<div class="hint-group"><div class="hint-group-title">${esc(g.title)}</div>` +
+    '<div class="hint-chips">' +
+    g.items.map((t) =>
+      `<button class="hint-chip" type="button" data-tpl="${esc(t)}">${esc(t)}</button>`).join('') +
+    '</div></div>').join('');
+
+  const limits =
+    '<div class="hint-group"><div class="hint-group-title">できないこと(LLM は形を見ていません)</div>' +
+    '<ul class="hint-no">' +
+    INSTRUCTION_LIMITS.map((l) =>
+      `<li>✕ <b>「${esc(l.what)}」</b> — ${esc(l.why)}</li>`).join('') +
+    '</ul>' +
+    '<p class="hint-note">形を指し示す指示は通りません。かわりに<b>寸法と座標(mm)</b>で伝えてください。' +
+    '3D ビューを見て判断するのはあなたの役割です。</p></div>';
+
+  body.innerHTML = groups + limits;
+
+  // クリックで入力欄へ引用(既存の入力があれば置き換えず、続けて書けるよう末尾に追記)
+  body.querySelectorAll('.hint-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      const tpl = chip.dataset.tpl;
+      const cur = chatInput.value.trim();
+      chatInput.value = cur ? `${cur}\n${tpl}` : tpl;
+      chatInput.focus();
+      chatInput.selectionStart = chatInput.selectionEnd = chatInput.value.length;
+    });
+  });
+}
+
 /** コピペモードの送信フロー: プロンプトを組み立ててクリップボードにコピーし、ログに残す */
 async function handleChatCopy(userText) {
   logChat('user', userText);
@@ -572,14 +810,19 @@ async function handleChatCopy(userText) {
 }
 
 /** コピペモードの「貼り付けを実行」: 貼り付けたテキストからコードを抽出して実行する */
-function handlePasteRun() {
+async function handlePasteRun() {
   const pasteInput = document.getElementById('paste-input');
+  const btn = document.getElementById('btn-paste-run');
   const text = pasteInput.value.trim();
   if (!text) return;
   logChat('ai', text);
   const code = extractCode(text);
-  const ok = runUserCode(code);
-  if (ok) pasteInput.value = '';
+  btn.disabled = true;
+  try {
+    if (await runUserCode(code)) pasteInput.value = '';
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -587,11 +830,15 @@ function handlePasteRun() {
 // ─────────────────────────────────────────────────────────────
 
 function loadSettings() {
+  const defaults = {
+    apiKey: '', model: 'gemini-2.5-flash',
+    systemPrompt: DEFAULT_SYSTEM_PROMPT, execHistory: [],
+  };
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) return Object.assign(defaults, JSON.parse(raw));
   } catch (_) { /* 破損時は既定値 */ }
-  return { apiKey: '', model: 'gemini-2.5-flash', systemPrompt: DEFAULT_SYSTEM_PROMPT };
+  return defaults;
 }
 
 function saveSettings() {
@@ -646,15 +893,31 @@ function initUI() {
   // コピペモード: 外部チャットの回答を貼り付けて実行
   document.getElementById('btn-paste-run').addEventListener('click', handlePasteRun);
 
-  // コード直接入力
+  // コード直接入力(= LLM 側の JavaScript 回答を貼り付けて実行する)
   const codeInput = document.getElementById('code-input');
+  const runBtn = document.getElementById('btn-run');
   codeInput.value = SAMPLE_CODE;
-  document.getElementById('btn-run').addEventListener('click', () => {
-    runUserCode(extractCode(codeInput.value));
+  runBtn.addEventListener('click', async () => {
+    runBtn.disabled = true;
+    try {
+      await runUserCode(extractCode(codeInput.value));
+    } finally {
+      runBtn.disabled = false;
+    }
   });
   document.getElementById('btn-sample').addEventListener('click', () => {
     codeInput.value = SAMPLE_CODE;
   });
+  document.getElementById('btn-code-clear').addEventListener('click', () => {
+    codeInput.value = '';
+    codeInput.focus();
+  });
+  document.getElementById('btn-debug-close').addEventListener('click', () => {
+    document.getElementById('debug-box').classList.add('hidden');
+  });
+
+  // 指示のヒント(できること / できないこと)
+  initHintLibrary();
 
   // ヘッダ操作
   document.getElementById('btn-download').addEventListener('click', downloadStl);

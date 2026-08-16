@@ -29,6 +29,17 @@
   <div id="app">
     <!-- 左: Three.js プレビュー領域(D&D で STL 読み込み) -->
     <section id="viewport" aria-label="3D プレビュー">
+      <!-- 実行中オーバーレイ。スピナーは transform アニメで、メインスレッドが
+           ブロックされてもコンポジタ側で回り続ける(フリーズ誤認の防止)。 -->
+      <div id="exec-overlay" class="hidden">
+        <div class="exec-card">
+          <div class="exec-spinner" aria-hidden="true"></div>
+          <div class="exec-title">実行中…</div>
+          <div id="exec-note" class="exec-note"></div>
+          <div class="exec-warn">計算中はブラウザの操作を受け付けません。<br>そのままお待ちください。</div>
+        </div>
+      </div>
+
       <div id="drop-hint">
         <div class="drop-hint-inner">
           <div class="drop-icon">⬇</div>
@@ -59,11 +70,23 @@
         </div>
         <p>ブラウザだけで完結する、テキスト指示 / コード実行による 3D モデル(STL)生成・編集ツールの PoC です。バックエンドは持ちません。</p>
         <ul>
-          <li><b>STL 編集</b> — STL/3MF を D&amp;D 読み込みし、チャット指示で CSG 加工(穴あけ・結合など)。</li>
+          <li><b>STL 編集</b> — STL/3MF を Drag&amp;Drop で読み込み、チャット指示で CSG 加工(穴あけ・結合など)。</li>
           <li><b>ゼロベース生成</b> — 何も読み込まずチャット指示だけで基本図形 + CSG から生成。</li>
-          <li><b>コード直接入力</b> — 外部 LLM で作った JavaScript を貼り付けて実行(Gemini 不使用)。</li>
+          <li><b>コード直接入力</b> — 外部 LLM で作った JavaScript を貼り付けて実行。</li>
         </ul>
-        <p class="info-note">⚠ 入力されたコードは <code>new Function</code> でそのまま実行されます。信頼できないコードは実行しないでください。</p>
+
+        <p class="info-h">CSG とは?</p>
+        <p>立体どうしを<b>「足す・引く・重なりを取る」</b>演算のことです。たとえば立方体から円柱を「引く」と、そこに穴が開きます。3D プリンタ用のモデルを組み立てるときの、いちばん基本になる操作です。</p>
+        <ul>
+          <li><b>結合(union)</b> — 2 つの立体をくっつけて 1 つにする。</li>
+          <li><b>削除(subtract)</b> — 片方の立体で削り取る。穴・溝・切り欠きはこれ。</li>
+          <li><b>交差(intersect)</b> — 重なっている部分だけを残す。</li>
+        </ul>
+
+        <p class="info-h">単位と座標</p>
+        <p>数値は <b>mm</b> として扱います(40 と書けば 40mm)。読み込んだモデルは<b>原点が中心</b>になるよう自動で移動されるので、「中心から 20mm 右」のように指示できます。</p>
+
+        <p class="info-note">⚠ 貼り付けたコードは、中身を検査せずそのまま実行されます。何が書かれていても実行されてしまうため、出どころの分からないコードは貼り付けないでください。</p>
       </div>
     </section>
 
@@ -79,9 +102,12 @@
 
       <!-- タブ切替: チャット / コード直接入力 -->
       <nav id="tabs" role="tablist">
-        <button class="tab tab-active" data-tab="chat" role="tab">チャット</button>
-        <button class="tab" data-tab="code" role="tab">コード直接入力</button>
-        <button class="tab" data-tab="settings" role="tab">設定</button>
+        <button class="tab tab-active" data-tab="chat" role="tab"
+          title="日本語で指示を出して、LLM にモデルを作らせる／直させるタブ">チャット</button>
+        <button class="tab" data-tab="code" role="tab"
+          title="LLM 側の JavaScript 回答を貼り付けて実行するタブ">コード直接入力</button>
+        <button class="tab" data-tab="settings" role="tab"
+          title="Gemini API キー・モデル・システムプロンプトの設定">設定</button>
       </nav>
 
       <!-- タブ: チャット。LLMとのやりとりは「コピペモード」「APIモード」の2種類 -->
@@ -90,6 +116,12 @@
           <button class="mode-btn mode-btn-active" data-mode="copy" type="button">📋 コピペモード</button>
           <button class="mode-btn" data-mode="api" type="button">🔌 API モード</button>
         </div>
+
+        <!-- 指示のヒント: クリックで入力欄に引用できるテンプレート集(main.js が生成) -->
+        <details id="hint-lib">
+          <summary>💡 指示のヒント — できること / できないこと</summary>
+          <div id="hint-lib-body"></div>
+        </details>
 
         <div id="chat-log" aria-live="polite"></div>
 
@@ -115,14 +147,30 @@
       <!-- タブ: コード直接入力(Gemini 不使用) -->
       <div class="tab-panel" data-panel="code">
         <p class="hint">
-          ChatGPT 等で生成した JavaScript を貼り付けて「実行」を押すと、シーンに反映されます。
+          <b>LLM 側の JavaScript 回答</b>をここに貼り付けて「STL反映実行」を押すと、3D ビューに反映されます。
           コードには <code>scene</code> / <code>THREE</code> / <code>CSG</code> /
           <code>targetMesh</code> / <code>setResult(mesh)</code> が渡されます。
         </p>
         <textarea id="code-input" rows="12" spellcheck="false"></textarea>
         <div class="row-between">
-          <button id="btn-sample" class="btn btn-ghost" type="button">サンプル挿入</button>
-          <button id="btn-run" class="btn btn-primary" type="button">実行</button>
+          <div class="btn-group">
+            <button id="btn-sample" class="btn btn-ghost" type="button"
+              title="動作確認用のサンプルコードを入れ直す">サンプル挿入</button>
+            <button id="btn-code-clear" class="btn btn-ghost" type="button"
+              title="入力欄を空にする">クリア</button>
+          </div>
+          <button id="btn-run" class="btn btn-primary" type="button"
+            title="コードを実行して 3D ビューのメッシュを差し替える">STL反映実行</button>
+        </div>
+
+        <!-- 実行結果の所要時間・統計・console 出力(デバッグ用) -->
+        <div id="debug-box" class="hidden">
+          <div class="debug-head">
+            <span>🔎 実行レポート</span>
+            <button id="btn-debug-close" class="btn-x" type="button" title="閉じる">×</button>
+          </div>
+          <dl id="debug-stats"></dl>
+          <pre id="debug-log" class="hidden"></pre>
         </div>
       </div>
 
@@ -204,7 +252,7 @@
       sitesJsonPath: 'config/subutomo-sites.json',
       logoPath: './common/assets/logo.png',
       theme: 'dark-bg',
-      version: '0.3.0',
+      version: '0.4.0',
       privacy: { localStorage: true, analytics: false },
       onSecretAction: null
     };
