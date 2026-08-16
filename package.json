@@ -1,0 +1,14 @@
+{
+  "name": "chat-3d",
+  "version": "0.1.0",
+  "description": "ブラウザ完結型・テキスト指示/コード実行による 3D モデル(STL)生成・編集ツール(PoC) by Subutomo Dev",
+  "author": "Subutomo Dev",
+  "license": "MIT",
+  "private": true,
+  "homepage": "https://t-sumita.github.io/chat-3d/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/t-sumita/chat-3d.git"
+  },
+  "keywords": ["three.js", "csg", "stl", "gemini", "3d", "poc", "browser"]
+}

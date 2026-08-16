@@ -1,0 +1,185 @@
+<!-- エントリポイント: ブラウザ完結型の 3D モデル(STL)生成・編集ツール -->
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat 3D — テキスト/コードで作る STL ツール</title>
+  <meta name="description" content="ブラウザだけで完結する、テキスト指示・コード実行による 3D モデル(STL)生成・編集ツール(PoC)。" />
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+  <link rel="apple-touch-icon" href="assets/favicon-180.png">
+
+  <!-- Three.js 系ライブラリと three-csg-ts を CDN から ES Modules で解決する。
+       importmap を使い、main.js からは素の名前で import できるようにする。 -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+      "three-csg-ts": "https://esm.sh/three-csg-ts@3.2.0?external=three"
+    }
+  }
+  </script>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- ══ アプリ本体: 左=3Dプレビュー / 右=操作パネル ══ -->
+  <div id="app">
+    <!-- 左: Three.js プレビュー領域(D&D で STL 読み込み) -->
+    <section id="viewport" aria-label="3D プレビュー">
+      <div id="drop-hint">
+        <div class="drop-hint-inner">
+          <div class="drop-icon">⬇</div>
+          <p>STL ファイルをここにドラッグ＆ドロップ</p>
+          <p class="drop-sub">または右パネルの指示だけでゼロから生成できます</p>
+        </div>
+      </div>
+      <div id="viewport-badges">
+        <span id="mode-badge" class="vp-badge">モード: —</span>
+        <span id="mesh-badge" class="vp-badge">メッシュ: なし</span>
+      </div>
+    </section>
+
+    <!-- 右: 操作パネル -->
+    <aside id="panel" aria-label="操作パネル">
+      <header id="panel-head">
+        <h1>Chat 3D</h1>
+        <div id="head-actions">
+          <button id="btn-reset" class="btn btn-ghost" title="シーンを空にする">クリア</button>
+          <button id="btn-download" class="btn btn-primary" title="現在のメッシュを STL 保存">STL ダウンロード</button>
+        </div>
+      </header>
+
+      <!-- タブ切替: チャット(Gemini) / コード直接入力 -->
+      <nav id="tabs" role="tablist">
+        <button class="tab tab-active" data-tab="chat" role="tab">チャット (Gemini)</button>
+        <button class="tab" data-tab="code" role="tab">コード直接入力</button>
+        <button class="tab" data-tab="settings" role="tab">設定</button>
+      </nav>
+
+      <!-- タブ: チャット -->
+      <div class="tab-panel tab-panel-active" data-panel="chat">
+        <div id="chat-log" aria-live="polite"></div>
+        <form id="chat-form">
+          <textarea id="chat-input" rows="3"
+            placeholder="例: 一辺 40mm の立方体の中心に直径 20mm の貫通穴をあけて"></textarea>
+          <div class="row-end">
+            <button type="submit" id="btn-send" class="btn btn-primary">送信</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- タブ: コード直接入力(Gemini 不使用) -->
+      <div class="tab-panel" data-panel="code">
+        <p class="hint">
+          ChatGPT 等で生成した JavaScript を貼り付けて「実行」を押すと、シーンに反映されます。
+          コードには <code>scene</code> / <code>THREE</code> / <code>CSG</code> /
+          <code>targetMesh</code> / <code>setResult(mesh)</code> が渡されます。
+        </p>
+        <textarea id="code-input" rows="12" spellcheck="false"></textarea>
+        <div class="row-between">
+          <button id="btn-sample" class="btn btn-ghost" type="button">サンプル挿入</button>
+          <button id="btn-run" class="btn btn-primary" type="button">実行</button>
+        </div>
+      </div>
+
+      <!-- タブ: 設定(Gemini API キー / モデル) -->
+      <div class="tab-panel" data-panel="settings">
+        <label class="field">
+          <span>Gemini API キー</span>
+          <input id="api-key" type="password" autocomplete="off"
+            placeholder="AIza..." />
+          <small>ブラウザの localStorage にのみ保存されます(サーバ送信なし)。</small>
+        </label>
+        <label class="field">
+          <span>モデル</span>
+          <select id="api-model">
+            <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+            <option value="gemini-flash-latest">gemini-flash-latest</option>
+          </select>
+        </label>
+        <details class="field">
+          <summary>システムプロンプト(編集可)</summary>
+          <textarea id="sys-prompt" rows="12" spellcheck="false"></textarea>
+          <button id="btn-reset-prompt" class="btn btn-ghost" type="button">既定に戻す</button>
+        </details>
+      </div>
+
+      <!-- エラー/ログ表示(動的実行のトレースをそのまま出す) -->
+      <div id="error-box" class="hidden" role="alert">
+        <div class="error-head">
+          <span>⚠ 実行エラー</span>
+          <button id="btn-error-close" class="btn-x" title="閉じる">×</button>
+        </div>
+        <pre id="error-trace"></pre>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ══ 統一フッター(spctrl-site 踏襲・ダークオーバーレイ)══ -->
+  <footer class="su-foot su-foot--overlay" data-lang="ja">
+    <div class="su-foot-right">
+      <span class="su-foot-support">
+        <a href="https://ko-fi.com/subutomo" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">☕ </span><span data-i18n="tip">チップ</span></a>
+        <span class="su-foot-sep" aria-hidden="true">・</span>
+        <a href="https://github.com/sponsors/t-sumita" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">❤️ </span>Sponsors</a>
+      </span>
+      <a class="su-foot-feedback" href="https://docs.google.com/forms/d/e/1FAIpQLSf_thpSe4TfQ_EloElTBsCiMKgypYTKLCs0dSTmaF_FXZSvIg/viewform?usp=pp_url&entry.2036331541=chat-3d" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">📣 </span><span data-i18n="feedback">ご意見・ご要望</span></a>
+    </div>
+  </footer>
+  <script>
+    (function () {
+      'use strict';
+      var foot = document.querySelector('.su-foot');
+      if (!foot) return;
+      var I18N = {
+        ja: { tip: 'チップ', feedback: 'ご意見・ご要望', toggle: 'EN' },
+        en: { tip: 'Tip',   feedback: 'Feedback',       toggle: '日本語' }
+      };
+      function detectLang() {
+        var l = (foot.getAttribute('data-lang') || document.documentElement.lang || 'ja').toLowerCase();
+        return l.indexOf('ja') === 0 ? 'ja' : 'en';
+      }
+      function applyLang(lang) {
+        var dict = I18N[lang] || I18N.ja, nodes = foot.querySelectorAll('[data-i18n]');
+        for (var i = 0; i < nodes.length; i++) {
+          var k = nodes[i].getAttribute('data-i18n');
+          if (dict[k] != null) nodes[i].textContent = dict[k];
+        }
+        foot.setAttribute('data-lang', lang);
+        document.documentElement.lang = lang;
+      }
+      applyLang(detectLang());
+    }());
+  </script>
+
+  <!-- Subutomo サイト選択バッジ(spctrl-site と同一の共有フッター体験) -->
+  <script>
+    window.SUBUTOMO_BADGE_CONFIG = {
+      currentSiteId: 'chat-3d',
+      sitesJsonPath: 'config/subutomo-sites.json',
+      logoPath: './common/assets/logo.png',
+      theme: 'dark-bg',
+      version: '0.1.0',
+      privacy: { localStorage: true, analytics: false },
+      onSecretAction: null
+    };
+  </script>
+  <script>
+    (function () {
+      var v = (window.SUBUTOMO_BADGE_CONFIG && window.SUBUTOMO_BADGE_CONFIG.version) || '';
+      var q = v ? '?v=' + encodeURIComponent(v) : '';
+      var badge = document.createElement('script');
+      badge.src = './assets/subutomo-badge.js' + q;
+      document.head.appendChild(badge);
+      var main = document.createElement('script');
+      main.type = 'module';
+      main.src = './main.js' + q;
+      document.head.appendChild(main);
+    }());
+  </script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+# OS / エディタ
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# ログ・一時
+*.log
+node_modules/
+
+# ローカル秘匿(API キーはコードに置かず localStorage 運用。念のため)
+.env
+.env.local
+secrets.*
