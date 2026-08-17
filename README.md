@@ -118,17 +118,25 @@ CSG を重ねたモデルは三角形数が多くなりがちです。Bambu Stud
 | `CSG` | three-csg-ts の `CSG` クラス（`union` / `subtract` / `intersect`） |
 | `targetMesh` | 現在の操作対象メッシュ（無ければ `null`） |
 | `setResult(mesh)` | 完成メッシュを 1 つ登録する関数 |
+| `mergeMeshes(meshes)` | 複数メッシュを **CSG を使わず**1 つに合成する関数（重なっていない形状専用） |
 
 - 完成メッシュは必ず `setResult(mesh)` で登録します（`scene` への add は不要）。
 - CSG 演算の前に、関与する各メッシュで `mesh.updateMatrix()` を呼んでください。
+- 穴が複数あるときは、切削体を `mergeMeshes([...])` でまとめて **`subtract` を 1 回**にします。
 
 ```js
-// 立方体に貫通穴をあける例
-const box = new THREE.Mesh(new THREE.BoxGeometry(40, 40, 40));
-const hole = new THREE.Mesh(new THREE.CylinderGeometry(10, 10, 60, 32));
-box.updateMatrix();
-hole.updateMatrix();
-setResult(CSG.subtract(box, hole));
+// 板に穴を2つあける例（CSG は1回だけ）
+const plate = new THREE.Mesh(new THREE.BoxGeometry(60, 40, 6));
+const holes = [-18, 18].map((x) => {
+  const h = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 10, 12)); // 半径3mm→12分割で十分
+  h.rotation.x = Math.PI / 2;
+  h.position.set(x, 0, 0);
+  return h;
+});
+const cutter = mergeMeshes(holes);   // ここは CSG を使わないので軽い
+plate.updateMatrix();
+cutter.updateMatrix();
+setResult(CSG.subtract(plate, cutter));
 ```
 
 ## ⚠ セキュリティに関する注意

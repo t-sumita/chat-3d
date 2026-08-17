@@ -22,7 +22,7 @@ const LS_KEY = 'chat3d.settings.v1';          // localStorage キー
 const MODEL_COLOR = 0x9ec5ff;                  // 生成メッシュの既定色
 const EXEC_HISTORY_MAX = 20;                   // 所要時間の推定に使う実行履歴の保持件数
 const UNDO_MAX = 12;                           // undo 履歴の保持段数(ジオメトリ実体を持つため控えめ)
-const PROMPT_VERSION = 2;                      // DEFAULT_SYSTEM_PROMPT を更新したら上げる
+const PROMPT_VERSION = 3;                      // DEFAULT_SYSTEM_PROMPT を更新したら上げる
 const TRI_WARN = 20000;                        // これを超えたら「重い処理」として強い警告を出す
 const TRI_CONFIRM = 60000;                     // これを超えたら実行前に明示的な確認を求める
 const WELD_PRECISION = 1e4;                    // パーツ分割時に頂点を同一視する量子化精度
@@ -42,6 +42,8 @@ const DEFAULT_SYSTEM_PROMPT = `あなたは Three.js と three-csg-ts に精通�
   - CSG        : three-csg-ts の CSG クラス
   - targetMesh : 現在の操作対象メッシュ(存在しない場合は null)
   - setResult  : setResult(mesh) で最終メッシュを1つ登録する関数
+  - mergeMeshes: mergeMeshes([mesh, ...]) で複数メッシュを CSG を使わず1つに合成する関数
+                 (重なっていない形状専用。複数の切削体をまとめて subtract を1回に減らす用途)
 - 単位は mm を 1 とみなして数値を組み立ててください(例: 40mm = 40)。
 
 # 厳守するルール
@@ -54,24 +56,62 @@ const DEFAULT_SYSTEM_PROMPT = `あなたは Three.js と three-csg-ts に精通�
 4. import 文・関数定義の外枠・説明文・markdown 見出しは書かないこと。
    返答は次の1つの \`\`\`js コードブロックのみ。前後に文章を付けないこと。
 
-# 計算負荷を抑えるルール(重要)
-CSG はブラウザのメインスレッドで同期実行されます。三角形数が増えると所要時間が
-急激に伸び、ブラウザが応答しなくなって作業が失われることがあります。
-また CSG は演算のたびに結果の三角形数を増やすため、加工を重ねるほど不利になります。
-形状が破綻しない範囲で、次を必ず守ってください。
+# 三角形数を最小化するルール(最重要)
+生成物は 3D プリンタで印刷されます。積層される以上 0.1〜0.2mm より細かい凹凸は
+印刷結果に現れないため、滑らかさに三角形を使っても無駄になります。
+一方、三角形が多いと(1) 実行が数分かかりブラウザが落ちる (2) スライサーが警告を出し、
+そこで簡略化すると穴が開いて壊れる、という実害が出ています。
 
-1. 分割数(segments)は既定値に任せず、必ず明示して控えめにすること。
-   - CylinderGeometry / ConeGeometry の radialSegments は 24 以下。
-     小さな穴やネジ下穴なら 12〜16 で十分です。
-   - SphereGeometry は widthSegments=16, heightSegments=12 程度。
-   - TorusGeometry など分割数が多くなる形状は、本当に必要なときだけ使うこと。
-2. CSG の呼び出し回数を最小にすること。同じ結果になるなら回数が少ない方を選ぶ。
-3. 移動・回転・拡大縮小・反転は CSG を使わず、geometry.translate() /
-   geometry.rotateX() / geometry.scale() で直接行うこと。
-   これらに CSG は不要で、使うと三角形数が無駄に増えます。
-4. ループで多数のメッシュを作り 1 つずつ CSG するのは避けること。
-   繰り返しが 10 個を超える場合は、CSG 回数がそのまま所要時間になることを
-   コード内のコメント(// …)で 1 行だけ注意喚起すること。
+**多少カクついても、三角形数が少ない形を優先してください。** 次の順に検討します。
+
+## 手順1: そもそも CSG を使わずに作れないか、最初に検討する(効果が最大)
+CSG は 1 回ごとにメッシュ全体を再分割するため、使わずに済むならそれが常に最良です。
+- **断面が一定の形**(板・ブラケット・スペーサー・ガスケット・押し出し形状)
+  → THREE.Shape に .holes を付けて ExtrudeGeometry。**穴あき板が CSG 0 回で作れます。**
+- **回転対称の形**(パイプ・筒・ノブ・カップ・段付き軸)
+  → THREE.LatheGeometry。中空でも CSG 0 回です。
+- 移動・回転・拡大縮小・反転 → geometry.translate() / rotateX() / scale() を使う。
+  これらに CSG は不要です。
+
+穴が4つある板を CSG 0 回で作る例:
+  const s = new THREE.Shape();
+  s.moveTo(-30, -20); s.lineTo(30, -20); s.lineTo(30, 20); s.lineTo(-30, 20);
+  for (const [x, y] of [[-20,-10],[20,-10],[-20,10],[20,10]]) {
+    const h = new THREE.Path();
+    h.absarc(x, y, 2.5, 0, Math.PI * 2, true);
+    s.holes.push(h);
+  }
+  const g = new THREE.ExtrudeGeometry(s,
+    { depth: 5, bevelEnabled: false, steps: 1, curveSegments: 12 });
+
+## 手順2: CSG が必要なら、呼び出し回数を最小にする
+- **穴・切り欠きが複数あるときは、切削体を mergeMeshes([...]) で 1 つにまとめ、
+  subtract は 1 回だけ**にすること。3 回の subtract より 1 回の方が圧倒的に軽い。
+  ※ mergeMeshes は互いに重なっていない形状専用(重なる場合のみ CSG.union)。
+- ループで多数のメッシュを作り 1 つずつ CSG するのは絶対に避けること。
+
+## 手順3: 分割数(segments)は必ず明示し、半径に応じた最小値にする
+既定値(32 等)は装飾用途で過剰です。次を守ってください。
+- CylinderGeometry / ConeGeometry / 円弧の radialSegments:
+    半径 2mm 以下 → 8 / 5mm 以下 → 12 / 10mm 以下 → 16 / 25mm 以下 → 24 / それ超 → 32
+- SphereGeometry は (半径, 12, 8)。大きい球でも (16, 10) まで。
+- BoxGeometry / PlaneGeometry の分割数は 1(既定のまま。増やす理由はありません)。
+- CylinderGeometry / ConeGeometry の heightSegments は 1。
+- ExtrudeGeometry は steps: 1、bevelEnabled: false。
+- TextGeometry は curveSegments: 2、bevelEnabled: false。
+- TorusGeometry など元から分割数が多い形状は避ける。使うなら (8, 16) 程度。
+
+## 手順4: 形の要求は軽い方に倒す
+- **フィレット(丸み)より面取り(チャンファー)を優先すること。**
+  丸みは分割数ぶん三角形を消費しますが、面取りは平面なのでほぼ無料です。
+  「角を丸めて」と言われても、丸みが明確に必要でなければ面取りで実現して構いません。
+- ローレット・ネジ山・細かい模様・装飾ディテールは三角形数が爆発するため、
+  指示に明示が無ければ足さないこと。
+
+## 手順5: CSG を使うときの作法
+- 貫通穴の切削体は、両端を 0.5mm 以上はみ出させること。面がぴったり重なると
+  不正な三角形が生まれ、STL が壊れる原因になります。
+- openEnded は false のままにすること(CSG には閉じた立体が必要です)。
 
 # 出力フォーマット
 \`\`\`js
@@ -131,17 +171,26 @@ const INSTRUCTION_LIMITS = [
 ];
 
 // コード直接入力タブに最初から入れておくサンプル(Box ∪ Sphere)。
-const SAMPLE_CODE = `// Box と Sphere を結合(union)して1つのメッシュにする例
-const box = new THREE.Mesh(new THREE.BoxGeometry(30, 30, 30));
-const sphere = new THREE.Mesh(new THREE.SphereGeometry(20, 32, 16));
-sphere.position.set(15, 15, 15);
+const SAMPLE_CODE = `// 60x40x6mm の板に、直径6mm の穴を2つあける例。
+// 穴ごとに subtract せず、切削体をまとめて CSG は1回だけにする(三角形数の抑制)。
+const plate = new THREE.Mesh(new THREE.BoxGeometry(60, 40, 6));
+
+// 半径3mm なので分割は12で十分。板(厚6)より長い10mm にして確実に貫通させる
+const holes = [-18, 18].map((x) => {
+  const h = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 10, 12));
+  h.rotation.x = Math.PI / 2;      // 円柱の軸(Y)を Z 方向へ倒す
+  h.position.set(x, 0, 0);
+  return h;
+});
+
+// 離れた切削体は CSG を使わず合成できる(こちらは軽い)
+const cutter = mergeMeshes(holes);
 
 // CSG 前に行列を確定させる(重要)
-box.updateMatrix();
-sphere.updateMatrix();
+plate.updateMatrix();
+cutter.updateMatrix();
 
-const merged = CSG.union(box, sphere);
-setResult(merged);`;
+setResult(CSG.subtract(plate, cutter));`;
 
 // ─────────────────────────────────────────────────────────────
 // 状態
@@ -440,6 +489,50 @@ function csgOp(op, a, b) {
   b.updateMatrix();
   const res = CSG[op](a, b);
   return res.geometry.clone().applyMatrix4(res.matrix);
+}
+
+/**
+ * 複数メッシュを CSG を使わずに 1 つのメッシュへ合成する。
+ *
+ * CSG は 1 回ごとにメッシュ全体を再分割して三角形数を増やすため、
+ * 「穴を N 個あける」を N 回の subtract で行うと爆発的に重くなる。
+ * 切削体を先にこれで 1 つへまとめ、subtract を 1 回に減らすのが狙い。
+ *
+ * 単なる面の寄せ集めなので、形状どうしが重なっていると内部に面が残る。
+ * 重なる形状の合成には CSG.union が必要(用途を切り分けること)。
+ * @param {THREE.Mesh[]} meshes 合成するメッシュ(各自の位置・回転は焼き込む)
+ * @returns {THREE.Mesh} 合成後のメッシュ
+ */
+function mergeMeshes(meshes) {
+  const list = (Array.isArray(meshes) ? meshes : [meshes])
+    .filter((m) => m && m.geometry && m.geometry.getAttribute('position'));
+  if (list.length === 0) {
+    throw new Error('mergeMeshes: 合成できるメッシュが渡されていません。');
+  }
+
+  const geos = list.map((m) => {
+    m.updateMatrix();
+    let g = m.geometry.clone().applyMatrix4(m.matrix);
+    if (g.index) g = g.toNonIndexed();          // index の有無が混ざると合成に失敗する
+    if (!g.getAttribute('normal')) g.computeVertexNormals();
+
+    // 属性の構成が違うと mergeGeometries が失敗するため position/normal/uv に揃える
+    const pos = g.getAttribute('position');
+    const out = new THREE.BufferGeometry();
+    out.setAttribute('position', pos.clone());
+    out.setAttribute('normal', g.getAttribute('normal').clone());
+    const uv = g.getAttribute('uv');
+    out.setAttribute('uv', uv
+      ? uv.clone()
+      : new THREE.BufferAttribute(new Float32Array(pos.count * 2), 2));
+    g.dispose();
+    return out;
+  });
+
+  const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+  if (!merged) throw new Error('mergeMeshes: ジオメトリの合成に失敗しました。');
+  if (geos.length > 1) geos.forEach((g) => g.dispose());
+  return new THREE.Mesh(merged, defaultMaterial());
 }
 
 /** 指定ジオメトリを targetMesh から削る(target が無ければ何もしない) */
@@ -1123,9 +1216,9 @@ async function runUserCode(code) {
   try {
     // 'use strict' を付けて、暗黙のグローバル汚染を防ぐ
     const fn = new Function(
-      'scene', 'THREE', 'CSG', 'targetMesh', 'setResult',
+      'scene', 'THREE', 'CSG', 'targetMesh', 'setResult', 'mergeMeshes',
       '"use strict";\n' + code);
-    const ret = fn(scene, THREE, CSG, targetMesh, setResult);
+    const ret = fn(scene, THREE, CSG, targetMesh, setResult, mergeMeshes);
     elapsed = performance.now() - t0;
 
     // setResult 優先。無ければ return 値をメッシュとして扱う

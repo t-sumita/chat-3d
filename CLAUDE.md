@@ -44,9 +44,18 @@ Subutomo Dev のツール系サイト群の一員として、共有フッター/
 ## 動的実行エンジンの契約(重要)
 ユーザー/LLM のコードには次が引数として渡される。仕様を変える場合はシステム
 プロンプト(`DEFAULT_SYSTEM_PROMPT`)とサンプル(`SAMPLE_CODE`)も同時に更新する。
-- `scene` / `THREE` / `CSG` / `targetMesh` / `setResult(mesh)`
+- `scene` / `THREE` / `CSG` / `targetMesh` / `setResult(mesh)` / `mergeMeshes(meshes)`
 - 完成メッシュは `setResult(mesh)` で 1 つだけ登録する(scene への add は側が行う)。
 - CSG 演算の前に各メッシュで `updateMatrix()` を呼ぶ(位置・回転の反映)。
+- `mergeMeshes([...])` は CSG を使わない合成。複数の切削体を 1 つにまとめて
+  `subtract` の回数を減らし、三角形数を抑えるためのもの(重なる形状には使えない)。
+
+## 三角形数の抑制(方針)
+CSG は結果の三角形数を増やし、多いと(a)実行が数分かかりブラウザが落ちる
+(b)スライサーで簡略化され穴が開く、という実害が出ている。**増えてから減らすのではなく、
+最初から作らせない**のが方針。`DEFAULT_SYSTEM_PROMPT` の「三角形数を最小化するルール」に
+優先順位付きで集約する(CSG を使わない構成 > CSG 回数の削減 > 分割数の削減 > 形の妥協)。
+プロンプトを更新したら `PROMPT_VERSION` を上げること(保存済み環境へ配るため)。
 
 ## セキュリティ上の注意
 - `new Function` によるコード実行は本質的に任意コード実行。PoC 前提の設計であり、
