@@ -231,6 +231,27 @@ html, body {
 .info-h { font-weight: 700; color: var(--accent); margin: 12px 0 5px !important; }
 .info-note { color: #ffd39b; font-size: 11.5px; }
 
+/* ── トースト(STL 保存時の軽い予告など) ── */
+#toast {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 25;
+  max-width: min(420px, calc(100% - 32px));
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(24, 27, 37, 0.96);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  cursor: pointer;
+}
+#toast.toast-warn { border-color: var(--accent-2); }
+#toast b { color: var(--accent-2); }
+
 /* ── 操作パネル ── */
 #panel {
   display: flex;

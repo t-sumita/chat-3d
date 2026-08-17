@@ -886,6 +886,37 @@ function downloadStl() {
   a.download = `chat-3d-${stamp()}.stl`;
   a.click();
   URL.revokeObjectURL(url);
+
+  // CSG を重ねたモデルはスライサー側で「三角形が多い」警告が出ることがあり、
+  // そこで安易に簡略化すると穴が開くことがある。保存の瞬間に軽く予告しておく。
+  const tris = triangleCount(targetMesh);
+  const heavy = tris >= TRI_WARN;
+  showToast(
+    `💾 保存しました(${tris.toLocaleString()} 三角形)。` +
+    (heavy
+      ? '<br><b>スライサーで「三角形が多い」と警告が出る可能性があります。</b>' +
+        '出ても<b>簡略化(Simplify)は使わず</b>、詳しくは右上「i」の' +
+        '「保存した STL をスライサーで開くとき」をご確認ください。'
+      : 'スライサーで警告が出た場合は、右上「i」の説明もご確認ください。'),
+    { warn: heavy });
+}
+
+let toastTimer = null;
+
+/**
+ * 画面下部に軽い通知を一定時間だけ表示する(確認は求めない、邪魔にならない告知用)。
+ * クリックすると即座に消える。
+ */
+function showToast(html, { warn = false, ms = 9000 } = {}) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.innerHTML = html;
+  el.classList.remove('hidden');
+  el.classList.toggle('toast-warn', warn);
+  clearTimeout(toastTimer);
+  const hide = () => el.classList.add('hidden');
+  el.onclick = hide;
+  toastTimer = setTimeout(hide, ms);
 }
 
 /** ファイル名用のタイムスタンプ(YYYYMMDD-HHMMSS) */
