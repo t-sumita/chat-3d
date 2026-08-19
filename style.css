@@ -251,6 +251,84 @@ html, body {
 .info-h { font-weight: 700; color: var(--accent); margin: 12px 0 5px !important; }
 .info-note { color: #ffd39b; font-size: 11.5px; }
 
+/* ── 右下: 表示補助(グリッド/軸)と座標ピック ──
+   左下は Subutomo バッジ、下中央はトーストが使うため右下に置く。 */
+#viewport-tools {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: calc(100% - 24px);
+}
+.view-legend {
+  padding: 5px 9px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.5);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+  text-align: right;
+}
+.view-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.vp-btn {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 13px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.5);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.vp-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(0, 0, 0, 0.7); }
+.vp-btn-active { border-color: var(--accent); color: var(--accent); background: rgba(78, 161, 255, 0.18); }
+
+/* 軸の色は AxesHelper(X=赤 / Y=緑 / Z=青)と一致させる */
+.ax-x { color: #ff6b6b; font-weight: 700; }
+.ax-y { color: #7ee787; font-weight: 700; }
+.ax-z { color: #79b8ff; font-weight: 700; }
+
+/* 座標ピックの吹き出し。left/top は main.js が毎フレーム書き込む */
+#pick-callout {
+  position: absolute;
+  z-index: 6;
+  transform: translate(-50%, calc(-100% - 14px));
+  padding: 8px 10px 8px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: rgba(18, 20, 28, 0.96);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+}
+/* 吹き出しのしっぽ(ピックした点を指す) */
+#pick-callout::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  background: rgba(18, 20, 28, 0.96);
+  border-right: 1px solid var(--accent);
+  border-bottom: 1px solid var(--accent);
+  transform: rotate(45deg);
+}
+/* カメラの裏に回った点は指し示せないので隠す */
+#pick-callout.behind { display: none; }
+#pick-callout .btn-x { position: absolute; top: 2px; right: 4px; color: var(--muted); }
+.pick-xyz { font-family: var(--mono); font-size: 12.5px; color: var(--text); padding-right: 14px; }
+.pick-unit { color: var(--muted); font-size: 11px; }
+.pick-actions { display: flex; gap: 6px; margin-top: 8px; }
+.pick-actions .btn { padding: 4px 9px; font-size: 11px; }
+
 /* ── トースト(STL 保存時の軽い予告など) ── */
 #toast {
   position: absolute;
@@ -494,6 +572,9 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 
 /* 消しゴム ON のときはカーソルで分かるようにする */
 #viewport.erasing canvas { cursor: crosshair; }
+/* Shift を押している間は座標ピックのカーソルにする。消しゴム(crosshair)と
+   見分けが付くよう別のカーソルを使い、消しゴム ON でもこちらが勝つよう後に置く。 */
+#viewport.picking canvas { cursor: cell; }
 .btn-icon { padding: 7px 10px; font-size: 15px; line-height: 1; }
 
 /* ── 実行レポート(所要時間・統計・console 出力) ── */

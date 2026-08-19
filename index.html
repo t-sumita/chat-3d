@@ -76,6 +76,26 @@
         </div>
       </div>
 
+      <!-- 右下: 表示補助(グリッド/軸)の ON/OFF と、座標の読み方の凡例。
+           座標ピックは Shift+クリックでモードを持たないため、案内は凡例に出す。
+           凡例とボタンのラベルは main.js が言語に合わせて書き込む。 -->
+      <div id="viewport-tools">
+        <div id="view-legend" class="view-legend"></div>
+        <div class="view-btns">
+          <button id="btn-guides" class="vp-btn" type="button" data-i18n-title="view.guidesTitle"></button>
+        </div>
+      </div>
+
+      <!-- 座標ピックの吹き出し。クリックした点へ追従させる(位置は main.js が毎フレーム更新) -->
+      <div id="pick-callout" class="hidden">
+        <button id="btn-pick-close" class="btn-x" type="button" data-i18n-title="common.close">×</button>
+        <div id="pick-xyz" class="pick-xyz"></div>
+        <div class="pick-actions">
+          <button id="btn-pick-copy" class="btn btn-ghost" type="button" data-i18n="view.pickCopy">コピー</button>
+          <button id="btn-pick-insert" class="btn btn-primary" type="button" data-i18n="view.pickInsert">指示に挿入</button>
+        </div>
+      </div>
+
       <!-- 右上: 言語切替と、目的・機能仕様を説明する info ボタン -->
       <button id="btn-lang" class="lang-btn" type="button"
         data-i18n="lang.label" data-i18n-title="lang.title">EN</button>
@@ -344,7 +364,7 @@
       sitesJsonPath: 'config/subutomo-sites.json',
       logoPath: './common/assets/logo.png',
       theme: 'dark-bg',
-      version: '0.10.0',
+      version: '0.11.0',
       privacy: { localStorage: true, analytics: false },
       onSecretAction: null
     };

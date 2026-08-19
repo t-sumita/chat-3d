@@ -395,9 +395,19 @@ function instructionLimits() {
 // 状態
 // ─────────────────────────────────────────────────────────────
 
+// 表示補助の寸法。1 マスの mm は凡例(view.legend)にも出すため定数から算出する。
+const GRID_SIZE = 200;                          // グリッド全体の一辺(mm)
+const GRID_DIV = 20;                            // グリッドの分割数(1 マス = 200/20 = 10mm)
+const AXES_LENGTH = 30;                         // XYZ 軸の長さ(mm)
+const PICK_MARKER_RATIO = 0.012;                // ピックマーカーの半径(モデル最大辺に対する比)
+const PICK_MARKER_MIN = 0.4;                    // 同・最小半径(mm)
+
 let scene, camera, renderer, controls;
 let targetMesh = null;                          // 現在の操作対象メッシュ
 let settings = loadSettings();
+let gridHelper = null, axesHelper = null;       // 表示補助(グリッド・XYZ 軸)
+let guidesOn = true;                            // 表示補助を出しているか
+let vpW = 0, vpH = 0;                           // ビューポートの実サイズ(毎フレームの再計測を避ける)
 
 // ─────────────────────────────────────────────────────────────
 // Three.js セットアップ
@@ -430,26 +440,33 @@ function initThree() {
   scene.add(fill);
 
   // 補助グリッドと軸(モデリングの基準)。グレー背景でも視認できる明るさにする。
-  const grid = new THREE.GridHelper(200, 20, 0x8890a0, 0x4a4f5c);
-  grid.material.opacity = 0.6;
-  grid.material.transparent = true;
-  scene.add(grid);
-  scene.add(new THREE.AxesHelper(30));
+  // ON/OFF できるようモジュール変数に保持する(setGuides が visible を切り替える)。
+  gridHelper = new THREE.GridHelper(GRID_SIZE, GRID_DIV, 0x8890a0, 0x4a4f5c);
+  gridHelper.material.opacity = 0.6;
+  gridHelper.material.transparent = true;
+  scene.add(gridHelper);
+  axesHelper = new THREE.AxesHelper(AXES_LENGTH);
+  scene.add(axesHelper);
 
+  vpW = viewport.clientWidth;
+  vpH = viewport.clientHeight;
   window.addEventListener('resize', onResize);
   animate();
 }
 
 function onResize() {
   const viewport = document.getElementById('viewport');
-  camera.aspect = viewport.clientWidth / viewport.clientHeight;
+  vpW = viewport.clientWidth;
+  vpH = viewport.clientHeight;
+  camera.aspect = vpW / vpH;
   camera.updateProjectionMatrix();
-  renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+  renderer.setSize(vpW, vpH);
 }
 
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
+  updatePickCallout();
   renderer.render(scene, camera);
 }
 
@@ -486,6 +503,8 @@ function setTargetMesh(mesh, frame = true) {
     disposeMesh(targetMesh);
   }
   targetMesh = mesh || null;
+  // ピックした点は差し替え後の表面には無いかもしれないので、選択を解除する
+  hidePick();
 
   if (targetMesh) {
     if (!targetMesh.material || targetMesh.material.isMeshBasicMaterial) {
@@ -995,6 +1014,183 @@ async function eraseAtPointer(ev) {
   const ball = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 16));
   ball.position.copy(hit.point);
   await subtractShape(ball, t('busy.erase', { r }));
+}
+
+// ── 表示補助(グリッド/軸)と座標ピック ──
+// LLM は形を見ていないため、位置は座標(mm)で伝えるしかない。その座標を
+// 目分量ではなくモデル表面のクリックから読み取れるようにするのがここの役目。
+//
+// 座標ピックは「モード」にしない。消しゴムと同じくクリックを消費するため、
+// モードにすると両方 ON にできてしまい、どちらが動くか利用者に予測できなくなる。
+// かわりに Shift + クリックに割り当て、消しゴム ON のままでも座標を読めるようにする。
+// (Ctrl は macOS で右クリック扱いになり、かつ Ctrl+Z / Ctrl+Y を undo/redo で使っている)
+
+const pickRay = new THREE.Raycaster();
+const pickPointer = new THREE.Vector2();
+const pickProj = new THREE.Vector3();     // 毎フレームの投影用(rAF 内で生成しない)
+let pickPoint = null;                     // 最後にピックした座標(null なら吹き出し非表示)
+let pickMarker = null;                    // ピック位置のマーカー。作り直さず使い回す
+let calloutEl = null;                     // 吹き出し要素(毎フレーム触るのでキャッシュ)
+let pickGuideShown = false;               // 使い方の案内は最初の 1 回だけログへ出す
+let pickNoMeshShown = false;              // 同・モデル未読み込みの案内
+
+/**
+ * 表示補助(グリッド・XYZ 軸)の ON/OFF を切り替える。凡例もここで描き直す。
+ * @param {boolean} on 表示するか
+ */
+function setGuides(on) {
+  guidesOn = on;
+  if (gridHelper) gridHelper.visible = on;
+  if (axesHelper) axesHelper.visible = on;
+
+  const btn = document.getElementById('btn-guides');
+  btn.textContent = t(on ? 'view.guidesOn' : 'view.guidesOff');
+  btn.classList.toggle('vp-btn-active', on);
+  renderViewLegend();
+}
+
+/**
+ * ビューポート右下の凡例を描き直す。Shift+クリックの案内は、モードを持たない
+ * 機能で唯一の手がかりなので、グリッドを消していても出したままにする。
+ */
+function renderViewLegend() {
+  const legend = document.getElementById('view-legend');
+  const grid = guidesOn ? `${t('view.legend', { mm: GRID_SIZE / GRID_DIV })}<br>` : '';
+  legend.innerHTML = grid + t('view.pickHint');
+}
+
+/** ピックの吹き出しとマーカーを隠す */
+function hidePick() {
+  pickPoint = null;
+  if (pickMarker) pickMarker.visible = false;
+  if (calloutEl) calloutEl.classList.add('hidden');
+}
+
+/** 座標を指示に書くときの桁(0.1mm)に丸める */
+function fmtMm(v) {
+  return v.toFixed(1);
+}
+
+/**
+ * Shift+クリックした位置のモデル表面の座標を読み取り、吹き出しで表示する。
+ * @param {PointerEvent} ev クリックのイベント
+ */
+function pickAtPointer(ev) {
+  if (!targetMesh) {
+    // モデルが無いうちは何度も言わない(空シーンで Shift+クリックしがちなため)
+    if (!pickNoMeshShown) {
+      logChat('sys', t('view.pickNoMesh'));
+      pickNoMeshShown = true;
+    }
+    return;
+  }
+  const rect = renderer.domElement.getBoundingClientRect();
+  pickPointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+  pickPointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+  pickRay.setFromCamera(pickPointer, camera);
+  const hit = pickRay.intersectObject(targetMesh, false)[0];
+  // 何もない場所をクリックしたら、選択を解除したものとして閉じる
+  if (!hit) {
+    hidePick();
+    return;
+  }
+
+  pickPoint = hit.point.clone();
+  showPickMarker(pickPoint);
+  calloutEl.classList.remove('hidden');
+  renderPickReadout();
+  updatePickCallout();
+
+  // 何に使えるのかは吹き出しだけでは伝わらないので、最初の 1 回だけ説明する
+  if (!pickGuideShown) {
+    logChat('sys', t('view.pickGuide'));
+    pickGuideShown = true;
+  }
+}
+
+/** 吹き出しの座標表示を、現在の言語で描き直す */
+function renderPickReadout() {
+  if (!pickPoint) return;
+  document.getElementById('pick-xyz').innerHTML = t('view.pickXyz', {
+    x: fmtMm(pickPoint.x), y: fmtMm(pickPoint.y), z: fmtMm(pickPoint.z),
+  });
+}
+
+/**
+ * ピック位置のマーカーを表示する。モデルの大きさに合わせて球の半径を変える
+ * (小さなモデルで巨大な球になるのを避けるため)。
+ * @param {THREE.Vector3} p ピックした座標
+ */
+function showPickMarker(p) {
+  if (!pickMarker) {
+    // モデルに埋もれず常に見えるよう、深度テストを切って最後に描く
+    const mat = new THREE.MeshBasicMaterial({ color: 0x9ec5ff, depthTest: false });
+    pickMarker = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), mat);
+    pickMarker.renderOrder = 999;
+    scene.add(pickMarker);
+  }
+  const s = meshSize(targetMesh);
+  const r = Math.max(PICK_MARKER_MIN, Math.max(s.x, s.y, s.z) * PICK_MARKER_RATIO);
+  pickMarker.scale.setScalar(r);
+  pickMarker.position.copy(p);
+  pickMarker.visible = true;
+}
+
+/** 吹き出しを、ピックした 3D 座標の画面位置へ追従させる(animate から毎フレーム) */
+function updatePickCallout() {
+  if (!pickPoint || !calloutEl) return;
+  pickProj.copy(pickPoint).project(camera);
+  calloutEl.style.left = `${(pickProj.x * 0.5 + 0.5) * vpW}px`;
+  calloutEl.style.top = `${(-pickProj.y * 0.5 + 0.5) * vpH}px`;
+  // カメラの後ろへ回った点は画面上で指し示せないため隠す
+  calloutEl.classList.toggle('behind', pickProj.z > 1);
+}
+
+/** ピックした座標を、指示文にそのまま貼れる文字列にする */
+function pickText() {
+  if (!pickPoint) return '';
+  return t('view.pickSnippet', {
+    x: fmtMm(pickPoint.x), y: fmtMm(pickPoint.y), z: fmtMm(pickPoint.z),
+  });
+}
+
+/** ビューポート右下の表示補助ツール(グリッド/軸・座標ピック)を配線する */
+function initViewTools() {
+  calloutEl = document.getElementById('pick-callout');
+  setGuides(true);
+
+  document.getElementById('btn-guides').addEventListener('click', () => setGuides(!guidesOn));
+  document.getElementById('btn-pick-close').addEventListener('click', hidePick);
+
+  // Shift を押している間だけカーソルを変え、「今クリックすると座標が取れる」と分かるようにする。
+  // モードが無いぶん、これが唯一の即時フィードバックになる。
+  const viewport = document.getElementById('viewport');
+  const syncShift = (e) => viewport.classList.toggle('picking', e.shiftKey);
+  window.addEventListener('keydown', syncShift);
+  window.addEventListener('keyup', syncShift);
+  // Alt+Tab などで Shift を押したまま離れると keyup が来ないため、戻ったとき用に消す
+  window.addEventListener('blur', () => viewport.classList.remove('picking'));
+
+  document.getElementById('btn-pick-copy').addEventListener('click', async () => {
+    if (!pickPoint) return;
+    try {
+      await navigator.clipboard.writeText(pickText());
+      showToast(t('view.pickCopied'), { ms: 4000 });
+    } catch (_) {
+      showToast(t('view.pickCopyFail'), { warn: true });
+    }
+  });
+
+  // 挿入先はチャットの入力欄。座標を書いたあと続きを打てるよう、タブごと切り替える
+  document.getElementById('btn-pick-insert').addEventListener('click', () => {
+    if (!pickPoint) return;
+    document.querySelector('.tab[data-tab="chat"]').click();
+    const input = document.getElementById('chat-input');
+    input.value = `${input.value.trim()} ${pickText()}`.trim();
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    logChat('sys', t('view.pickInserted'));
+  });
 }
 
 // ── 図形・テキストの追加 ──
@@ -1969,16 +2165,21 @@ function initEditUI() {
     else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
   });
 
-  // 消しゴムのクリック判定。ドラッグ(視点回転)と区別するため移動量を見る
+  // 消しゴム / 座標ピックのクリック判定。ドラッグ(視点回転)と区別するため移動量を見る。
+  // Shift を押していれば座標ピック、押していなければ消しゴム(消しゴムが ON のときだけ)。
   let downAt = null;
   renderer.domElement.addEventListener('pointerdown', (e) => {
-    downAt = { x: e.clientX, y: e.clientY };
+    downAt = { x: e.clientX, y: e.clientY, shift: e.shiftKey };
   });
   renderer.domElement.addEventListener('pointerup', (e) => {
     if (!downAt) return;
     const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
+    // 押し始めと離したときのどちらで Shift を握っていても座標ピックとして扱う
+    const shift = downAt.shift || e.shiftKey;
     downAt = null;
-    if (moved < 5) eraseAtPointer(e);
+    if (moved >= 5) return;
+    if (shift) pickAtPointer(e);
+    else eraseAtPointer(e);
   });
 
   updateEditReadout();
@@ -2240,6 +2441,8 @@ function relocalize(sysPrompt, codeInput) {
   updateBadges();
   updateEditReadout();
   setEraser(eraserOn, false);
+  setGuides(guidesOn);
+  renderPickReadout();
   setChatMode(chatMode, false);
   initHintLibrary();
   if (parts.length) renderPartsList(false);
@@ -2263,6 +2466,7 @@ function main() {
   initThree();
   initDragAndDrop();
   initUI();
+  initViewTools();
   updateBadges();
   resetHistory();
   logChat('sys', t('msg.welcome1'));

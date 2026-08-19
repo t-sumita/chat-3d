@@ -240,6 +240,39 @@ A の行列を入れて返す。行列を捨てると `targetMesh` が変換を�
 視点のドラッグ回転と区別するため、`pointerdown` → `pointerup` の移動量が **5px 未満**の
 ときだけクリックとみなす。1 クリックごとに CSG が 1 回走るので、密なメッシュでは遅い。
 
+### 表示補助(グリッド/軸)と座標ピック(v0.11.0)
+LLM は形を見ていないため、位置は座標(mm)でしか伝えられない。その座標を目分量ではなく
+モデル表面のクリックから読み取れるようにしたもの。
+
+- **グリッド/軸**: `initThree()` で作った `GridHelper` / `AxesHelper` をモジュール変数
+  (`gridHelper` / `axesHelper`)に持ち、`setGuides(on)` が `visible` を切り替える。
+  寸法は `GRID_SIZE` / `GRID_DIV` / `AXES_LENGTH` の定数。凡例(`view.legend`)へ出す
+  「1 マス = N mm」は `GRID_SIZE / GRID_DIV` から算出するので、定数を変えれば表示も追従する。
+- **座標ピック**: **Shift + クリック**で `pickAtPointer()`。`Raycaster` の交点(`hit.point`)を
+  `pickPoint` に控え、マーカー(`pickMarker`)を置いて吹き出し(`#pick-callout`)を出す。
+- **なぜモードにしないか**: 消しゴムと座標ピックはどちらもクリックを消費する。両方を ON/OFF の
+  モードにすると、排他にしたところで「今どちらが動くか」を利用者が覚えていられない。修飾キーなら
+  押している間だけ切り替わるので取り合いが起きず、消しゴム ON のままでも座標を読める。
+  修飾キーに **Shift** を選んだのは、Ctrl が macOS で右クリック扱いになること、
+  Ctrl+Z / Ctrl+Y を undo/redo で使っていること、OrbitControls が Shift を使わないため。
+  `pointerdown` / `pointerup` のどちらかで Shift を握っていればピックとみなす(取りこぼし防止)。
+- **修飾キーは画面に出ない**ため、代わりの手がかりを 2 つ置く。凡例の常設案内
+  (`view.pickHint`、グリッドを消しても残す)と、Shift 押下中だけ変わるカーソル
+  (`#viewport.picking canvas { cursor: cell }`。消しゴムの `crosshair` に勝つよう CSS の
+  後ろに置く)。`keydown` / `keyup` に加えて `blur` でもクラスを外す(Alt+Tab で
+  `keyup` が来ず、押しっぱなし表示のまま残るため)。
+- 使い方の案内(`view.pickGuide`)とモデル未読み込みの案内(`view.pickNoMesh`)は、
+  `pickGuideShown` / `pickNoMeshShown` で**セッション中 1 回だけ**ログへ出す。
+  モードの ON 契機が無いぶんログに出す回数を絞らないとうるさい。
+- **吹き出しの追従**: `animate()` から毎フレーム `updatePickCallout()` を呼び、`pickPoint` を
+  `camera` で投影して `left` / `top` を書き換える。**rAF 内で Vector3 を作らない**ため
+  投影用の `pickProj` はモジュール定数、ビューポートのサイズも毎フレーム計測せず
+  `vpW` / `vpH`(`initThree` / `onResize` で更新)を使う。`pickProj.z > 1`(カメラの裏)なら
+  `.behind` を付けて隠す。
+- **マーカー**: 使い回す 1 個の球。`depthTest: false` + `renderOrder = 999` でモデルに埋もれない。
+  半径はモデル最大辺の `PICK_MARKER_RATIO` 倍(最小 `PICK_MARKER_MIN` mm)。
+- `setTargetMesh()` は `hidePick()` を呼ぶ。差し替え後の表面に同じ点があるとは限らないため。
+
 ### 図形・テキスト追加
 - `buildPrimitive()` — Box / Cylinder / Sphere / Cone をサイズと位置(mm)から生成。
 - `buildTextMesh()` — `FontLoader` で helvetiker を 1 度だけ取得してキャッシュし

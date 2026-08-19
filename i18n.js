@@ -40,6 +40,27 @@ const JA = {
   'badge.mesh': 'メッシュ: {x} × {y} × {z} mm',
   'badge.meshNone': 'メッシュ: なし',
 
+  // ── 表示補助(グリッド/軸)と座標ピック ──
+  'view.guidesOn': 'グリッド/軸: ON',
+  'view.guidesOff': 'グリッド/軸: OFF',
+  'view.guidesTitle': '寸法の目安になるグリッドと XYZ 軸の表示を切り替える',
+  'view.legend': '<b>グリッド 1 マス = {mm} mm</b> ／ 原点 (0,0,0) はモデルの中心<br>' +
+    '<span class="ax-x">X</span> 左右 ／ <span class="ax-y">Y</span> 高さ ／ <span class="ax-z">Z</span> 奥行き',
+  'view.pickHint': '📍 <b>Shift + クリック</b>でその点の座標を表示',
+  'view.pickGuide': '📍 座標ピック: Shift + クリックした点の座標(mm)を吹き出しに表示しています。' +
+    '「指示に挿入」を押すとチャットの入力欄に座標が入ります。LLM は形を見ていないので、' +
+    '位置はこの座標で伝えるのが確実です(消しゴムを ON にしたままでも使えます)。',
+  'view.pickNoMesh': '📍 座標ピック(Shift + クリック): 先にモデルを読み込むか、生成してください。',
+  'view.pickXyz': '<span class="ax-x">X</span> {x} <span class="ax-y">Y</span> {y} ' +
+    '<span class="ax-z">Z</span> {z} <span class="pick-unit">mm</span>',
+  'view.pickSnippet': '座標 (X={x}, Y={y}, Z={z}) mm の位置に',
+  'view.pickCopy': 'コピー',
+  'view.pickCopied': '📍 座標をコピーしました。',
+  'view.pickCopyFail': '⚠ コピーできませんでした。吹き出しの数値を手で控えてください。',
+  'view.pickInsert': '指示に挿入',
+  'view.pickInserted': '📍 チャットの入力欄に座標を入れました。' +
+    '続けて「…直径 8mm・深さ 5mm の穴をあけて」のように書き足してください。',
+
   // ── info パネル ──
   'info.btnTitle': 'このツールについて',
   'info.head': 'Chat 3D について',
@@ -62,6 +83,8 @@ const JA = {
 
     <p class="info-h">単位と座標</p>
     <p>数値は <b>mm</b> として扱います(40 と書けば 40mm)。読み込んだモデルは<b>原点が中心</b>になるよう自動で移動されるので、「中心から 20mm 右」のように指示できます。</p>
+    <p>床のグリッドは <b>1 マス 10mm</b>、原点から伸びる 3 本の線が座標軸です(<b><span class="ax-x">X</span> = 左右</b> ／ <b><span class="ax-y">Y</span> = 高さ</b> ／ <b><span class="ax-z">Z</span> = 奥行き</b>)。3D ビュー右下のボタンで表示を消せます。</p>
+    <p><b>指示に書く座標が分からないときは、モデルを Shift + クリック</b>してください。その点の座標が吹き出しに出て、そのままチャットの入力欄へ挿入できます。LLM は形を見ていないので、位置はこの座標で伝えるのが確実です。消しゴムを ON にしたままでも使えます(Shift を押している間だけ座標の読み取りになります)。</p>
 
     <p class="info-h">保存した STL はそのまま印刷できます</p>
     <p>「STL 保存」を押すと、書き出しの直前に<b>自動で水密化(修復)</b>を行います。CSG は原理上、つながっていない面(T ジャンクション)と厚みゼロの内部の壁を作ってしまい、そのまま出すとスライサーで「面が欠けている」「非多様体エッジ」と言われます。それを保存のたびに 1 回だけ直しています。</p>
@@ -131,7 +154,9 @@ const JA = {
   'copy.fail': '⚠ コピー失敗(手動で選択してください)',
   'hint.limitsTitle': 'できないこと(LLM は形を見ていません)',
   'hint.note': '形を指し示す指示は通りません。かわりに<b>寸法と座標(mm)</b>で伝えてください。' +
-    '3D ビューを見て判断するのはあなたの役割です。',
+    '3D ビューを見て判断するのはあなたの役割です。<br>' +
+    '座標が分からないときは、3D ビューでモデルを <b>Shift + クリック</b>してください。' +
+    'その点の座標を読み取って、この入力欄へ挿入できます。',
 
   // ── 編集タブ ──
   'edit.hint': 'チャットを使わずに直接編集します。操作はすべてヘッダの <b>↶ / ↷</b>(Ctrl+Z / Ctrl+Y)で元に戻せます。',
@@ -318,6 +343,29 @@ const EN = {
   'badge.mesh': 'Mesh: {x} × {y} × {z} mm',
   'badge.meshNone': 'Mesh: none',
 
+  // ── Guides (grid / axes) and the coordinate picker ──
+  'view.guidesOn': 'Grid / axes: ON',
+  'view.guidesOff': 'Grid / axes: OFF',
+  'view.guidesTitle': 'Show or hide the reference grid and the XYZ axes',
+  'view.legend': '<b>1 grid square = {mm} mm</b> · the origin (0,0,0) is the centre of the model<br>' +
+    '<span class="ax-x">X</span> left–right · <span class="ax-y">Y</span> height · ' +
+    '<span class="ax-z">Z</span> depth',
+  'view.pickHint': '📍 <b>Shift + click</b> a point to read its coordinates',
+  'view.pickGuide': '📍 Coordinate picker: the callout shows the coordinates (mm) of the point you ' +
+    'Shift-clicked. “Insert into instruction” drops them into the chat box. The LLM cannot see the ' +
+    'shape, so coordinates are the reliable way to say where something goes (this works even while ' +
+    'the eraser is ON).',
+  'view.pickNoMesh': '📍 Coordinate picker (Shift + click): load or generate a model first.',
+  'view.pickXyz': '<span class="ax-x">X</span> {x} <span class="ax-y">Y</span> {y} ' +
+    '<span class="ax-z">Z</span> {z} <span class="pick-unit">mm</span>',
+  'view.pickSnippet': 'at (X={x}, Y={y}, Z={z}) mm',
+  'view.pickCopy': 'Copy',
+  'view.pickCopied': '📍 Coordinates copied.',
+  'view.pickCopyFail': '⚠ Could not copy. Please note the numbers in the callout by hand.',
+  'view.pickInsert': 'Insert into instruction',
+  'view.pickInserted': '📍 Coordinates added to the chat box. Continue with something like ' +
+    '“…drill an 8 mm hole, 5 mm deep”.',
+
   // ── Info panel ──
   'info.btnTitle': 'About this tool',
   'info.head': 'About Chat 3D',
@@ -340,6 +388,8 @@ const EN = {
 
     <p class="info-h">Units and coordinates</p>
     <p>Numbers are <b>millimetres</b> (write 40 and you get 40&nbsp;mm). A loaded model is automatically moved so that <b>the origin is at its centre</b>, so you can say things like “20&nbsp;mm to the right of the centre”.</p>
+    <p>One square of the floor grid is <b>10&nbsp;mm</b>, and the three lines through the origin are the axes (<b><span class="ax-x">X</span> = left–right</b> · <b><span class="ax-y">Y</span> = height</b> · <b><span class="ax-z">Z</span> = depth</b>). The button at the bottom right of the 3D view hides them.</p>
+    <p><b>If you do not know which coordinates to write, Shift + click the model.</b> A callout shows the coordinates of that point and can insert them into the chat box. The LLM cannot see the shape, so coordinates are the reliable way to say where something goes. This works even while the eraser is ON — holding Shift switches that click to reading coordinates.</p>
 
     <p class="info-h">Saved STL files are ready to print</p>
     <p>When you press “Save STL”, the mesh is <b>made watertight automatically</b> just before export. By design, CSG leaves faces that do not share their corners (T-junctions) and zero-thickness internal walls; exported as-is, a slicer reports “missing faces” and “non-manifold edges”. That is repaired once, on every save.</p>
@@ -409,7 +459,9 @@ const EN = {
   'copy.fail': '⚠ Copy failed — please select it manually',
   'hint.limitsTitle': 'What does not work (the LLM cannot see the shape)',
   'hint.note': 'Instructions that point at a feature will not work. Describe it with <b>dimensions and coordinates (mm)</b> instead. ' +
-    'Judging the shape in the 3D view is your job.',
+    'Judging the shape in the 3D view is your job.<br>' +
+    'If you do not know the coordinates, <b>Shift + click</b> the model in the 3D view — the ' +
+    'coordinates of that point can be inserted straight into this box.',
 
   // ── Edit tab ──
   'edit.hint': 'Edit directly, without chat. Everything here can be undone with <b>↶ / ↷</b> in the header (Ctrl+Z / Ctrl+Y).',
