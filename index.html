@@ -1,4 +1,5 @@
 <!-- エントリポイント: ブラウザ完結型の 3D モデル(STL)生成・編集ツール -->
+<!-- 表示文言は data-i18n 属性でマークし、i18n.js が日本語/英語を流し込む -->
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -28,15 +29,15 @@
   <!-- ══ アプリ本体: 左=3Dプレビュー / 右=操作パネル ══ -->
   <div id="app">
     <!-- 左: Three.js プレビュー領域(D&D で STL 読み込み) -->
-    <section id="viewport" aria-label="3D プレビュー">
+    <section id="viewport" aria-label="3D preview">
       <!-- 実行中オーバーレイ。スピナーは transform アニメで、メインスレッドが
            ブロックされてもコンポジタ側で回り続ける(フリーズ誤認の防止)。 -->
       <div id="exec-overlay" class="hidden">
         <div class="exec-card">
           <div class="exec-spinner" aria-hidden="true"></div>
-          <div class="exec-title">実行中…</div>
+          <div class="exec-title" data-i18n="exec.title">実行中…</div>
           <div id="exec-note" class="exec-note"></div>
-          <div id="exec-warn" class="exec-warn">計算中はブラウザの操作を受け付けません。<br>そのままお待ちください。</div>
+          <div id="exec-warn" class="exec-warn" data-i18n-html="exec.warn"></div>
         </div>
       </div>
 
@@ -46,8 +47,8 @@
           <div id="confirm-title" class="confirm-title"></div>
           <div id="confirm-body" class="confirm-body"></div>
           <div class="confirm-actions">
-            <button id="btn-confirm-cancel" class="btn" type="button">やめる</button>
-            <button id="btn-confirm-go" class="btn btn-warn" type="button">それでも実行する</button>
+            <button id="btn-confirm-cancel" class="btn" type="button" data-i18n="confirm.cancel">やめる</button>
+            <button id="btn-confirm-go" class="btn btn-warn" type="button" data-i18n="confirm.go">それでも実行する</button>
           </div>
         </div>
       </div>
@@ -55,8 +56,8 @@
       <div id="drop-hint">
         <div class="drop-hint-inner">
           <div class="drop-icon">⬇</div>
-          <p>STL / 3MF ファイルをここにドラッグ＆ドロップ</p>
-          <p class="drop-sub">または右パネルの指示だけでゼロから生成できます</p>
+          <p data-i18n="drop.main">STL / 3MF ファイルをここにドラッグ＆ドロップ</p>
+          <p class="drop-sub" data-i18n="drop.sub">または右パネルの指示だけでゼロから生成できます</p>
         </div>
       </div>
 
@@ -67,7 +68,7 @@
       <div id="viewport-topleft">
         <div id="app-title">
           <span class="app-title-main">Chat 3D</span>
-          <span class="app-title-sub">テキスト指示・コード実行で作る 3D モデル(STL/3MF)ツール</span>
+          <span class="app-title-sub" data-i18n="app.sub">テキスト指示・コード実行で作る 3D モデル(STL/3MF)ツール</span>
         </div>
         <div id="viewport-badges">
           <span id="mode-badge" class="vp-badge">モード: —</span>
@@ -75,108 +76,65 @@
         </div>
       </div>
 
-      <!-- 右上: 目的・機能仕様を説明する info ボタン(タイトルの反対側) -->
+      <!-- 右上: 言語切替と、目的・機能仕様を説明する info ボタン -->
+      <button id="btn-lang" class="lang-btn" type="button"
+        data-i18n="lang.label" data-i18n-title="lang.title">EN</button>
       <button id="btn-info" class="info-btn" type="button"
-        title="このツールについて" aria-haspopup="true" aria-expanded="false">i</button>
-      <div id="info-panel" class="hidden" role="dialog" aria-label="Chat 3D について">
+        data-i18n-title="info.btnTitle" aria-haspopup="true" aria-expanded="false">i</button>
+      <div id="info-panel" class="hidden" role="dialog" aria-label="About Chat 3D">
         <div class="info-head">
-          <span>Chat 3D について</span>
-          <button id="btn-info-close" class="btn-x" type="button" title="閉じる">×</button>
+          <span data-i18n="info.head">Chat 3D について</span>
+          <button id="btn-info-close" class="btn-x" type="button" data-i18n-title="common.close">×</button>
         </div>
-        <p>ブラウザだけで完結する、テキスト指示 / コード実行による 3D モデル(STL)生成・編集ツールの PoC です。バックエンドは持ちません。</p>
-        <ul>
-          <li><b>STL 編集</b> — STL/3MF を Drag&amp;Drop で読み込み、チャット指示で CSG 加工(穴あけ・結合など)。</li>
-          <li><b>ゼロベース生成</b> — 何も読み込まずチャット指示だけで基本図形 + CSG から生成。</li>
-          <li><b>編集</b> — チャットを使わず、拡大縮小・消しゴム・パーツ分割・図形/文字の追加をマウスと数値で直接操作。</li>
-          <li><b>コード直接入力</b> — 外部 LLM で作った JavaScript を貼り付けて実行。</li>
-        </ul>
-
-        <p class="info-h">CSG とは?</p>
-        <p>立体どうしを<b>「足す・引く・重なりを取る」</b>演算のことです。たとえば立方体から円柱を「引く」と、そこに穴が開きます。3D プリンタ用のモデルを組み立てるときの、いちばん基本になる操作です。</p>
-        <ul>
-          <li><b>結合(union)</b> — 2 つの立体をくっつけて 1 つにする。</li>
-          <li><b>削除(subtract)</b> — 片方の立体で削り取る。穴・溝・切り欠きはこれ。</li>
-          <li><b>交差(intersect)</b> — 重なっている部分だけを残す。</li>
-        </ul>
-
-        <p class="info-h">単位と座標</p>
-        <p>数値は <b>mm</b> として扱います(40 と書けば 40mm)。読み込んだモデルは<b>原点が中心</b>になるよう自動で移動されるので、「中心から 20mm 右」のように指示できます。</p>
-
-        <p class="info-h">保存した STL をスライサーで開くとき</p>
-        <p>CSG(穴あけ・結合など)を重ねると、見た目は変わらなくても<b>三角形の数だけがどんどん増えていきます</b>。そのため Bambu Studio などのスライサーで開いたときに「三角形が多すぎる」という警告が出ることがあります。</p>
-        <p>そこで<b>スライサー側の「簡略化(Simplify)」機能で三角形を大まかに減らすと、モデルに穴が開いて壊れることがあります。</b>単純に間引く処理は、閉じた立体(水密)としての整合性まで見てくれないためです。</p>
-        <ul>
-          <li>警告が出ても、<b>そのままスライスできる場合は簡略化しない</b>のが一番安全です。</li>
-          <li>減らしたい場合は、雑な簡略化ではなく<b>「修復(Repair)」機能があるツール</b>(Bambu Studio の右クリックメニューの修復、Meshmixer、Netfabb など)を先に試してください。</li>
-          <li>穴が開いてしまった場合も、多くのスライサーには<b>自動修復</b>機能があります(今回のように「モデルオブジェクトを修復中」と出るのがそれです)。</li>
-          <li>そもそも三角形を増やさないよう、この chat-3d 側でも指示や設定を工夫しています(分割数を控えめにする・CSG の回数を減らす、など)。</li>
-        </ul>
-
-        <p class="info-h">「面が欠けている」問題と、その自動修復</p>
-        <p>以前は、保存した STL をスライサーで開くと<b>少しだけ面が欠けている</b>ことがありました。原因は<b>T ジャンクション</b>です。CSG が面を切るとき、切られた面の<b>隣の面までは切ってくれない</b>ため、辺の途中に他の面の角が乗った状態が残ります。実際に隙間が空いているわけではないのですが、面どうしが角を共有していないので、スライサーからは「つながっていない=欠けている」と見えます。</p>
-        <p><b>v0.9.0 から、STL 保存時に自動で修復します。</b>辺の上に乗っている角でその面を分割し直すだけなので、<b>形は 1 ミクロンも変わりません</b>(頂点を動かさず、既存の辺の上にだけ角を足します)。</p>
-        <p><b>v0.9.1 では、厚みゼロの「内部の壁」も取り除きます。</b>表と裏の面が背中合わせにぴったり重なった膜で、体積には一切影響しませんが、スライサーからは「1 本の辺を 3 面以上が共有している(非多様体エッジ)」というエラーに見えます。これも形を変えずに消せます。</p>
-        <ul>
-          <li>実測(20mm のダイス): つながっていない辺 <b>1,316 → 0</b>、非多様体エッジ <b>17 → 0</b>、三角形 2,240 → 2,936、体積の変化なし。</li>
-          <li>保存時のトーストに「🩹 面の欠けを修復しました」と出れば成功です。</li>
-          <li>それでもスライサーが修復を促す場合は、下の注意を読んでから修復してください。</li>
-        </ul>
-        <p><b>スライサー側の修復を使うときの注意:</b></p>
-        <ul>
-          <li>⚠ <b>修復は「意図して作った部分」まで消すことがあります。</b>細い突起・薄い板・小さな穴などは、修復する側から見ると「壊れた部分」と区別がつきません。</li>
-          <li><b>修復の前後で形を見比べる</b>／<b>修復前の STL を別名で残しておく</b>。</li>
-          <li>細部が消えてしまう場合は、修復に頼らず<b>chat-3d 側で作り直す</b>ほうが早いことが多いです(細い部分は 1.5mm 以上、小さすぎる穴はやめる)。</li>
-          <li><b>簡略化(Simplify)は修復とは別物</b>です。簡略化は穴を増やす方向に働くので使わないでください。</li>
-        </ul>
-
-        <p class="info-note">⚠ 貼り付けたコードは、中身を検査せずそのまま実行されます。何が書かれていても実行されてしまうため、出どころの分からないコードは貼り付けないでください。</p>
+        <div id="info-body" data-i18n-html="info.body"></div>
       </div>
     </section>
 
     <!-- 右: 操作パネル -->
-    <aside id="panel" aria-label="操作パネル">
+    <aside id="panel" aria-label="Control panel">
       <header id="panel-head">
         <h1>Chat 3D</h1>
         <div id="head-actions">
           <button id="btn-undo" class="btn btn-ghost btn-icon" type="button"
-            title="元に戻す (Ctrl+Z)" disabled>↶</button>
+            data-i18n-title="head.undo" disabled>↶</button>
           <button id="btn-redo" class="btn btn-ghost btn-icon" type="button"
-            title="やり直す (Ctrl+Y)" disabled>↷</button>
-          <button id="btn-reset" class="btn btn-ghost" title="シーンを空にする">クリア</button>
-          <button id="btn-download" class="btn btn-primary" title="現在のメッシュを STL 保存">STL 保存</button>
+            data-i18n-title="head.redo" disabled>↷</button>
+          <button id="btn-reset" class="btn btn-ghost"
+            data-i18n="head.clear" data-i18n-title="head.clearTitle">クリア</button>
+          <button id="btn-download" class="btn btn-primary"
+            data-i18n="head.save" data-i18n-title="head.saveTitle">STL 保存</button>
         </div>
       </header>
 
-      <!-- タブ切替: チャット / コード直接入力 -->
+      <!-- タブ切替: チャット / 編集 / コード / 設定 -->
       <nav id="tabs" role="tablist">
         <button class="tab tab-active" data-tab="chat" role="tab"
-          title="日本語で指示を出して、LLM にモデルを作らせる／直させるタブ">チャット</button>
+          data-i18n="tab.chat" data-i18n-title="tab.chatTitle">チャット</button>
         <button class="tab" data-tab="edit" role="tab"
-          title="チャットを使わず、マウス操作と数値入力で直接編集するタブ">編集</button>
+          data-i18n="tab.edit" data-i18n-title="tab.editTitle">編集</button>
         <button class="tab" data-tab="code" role="tab"
-          title="LLM 側の JavaScript 回答を貼り付けて実行するタブ">コード</button>
+          data-i18n="tab.code" data-i18n-title="tab.codeTitle">コード</button>
         <button class="tab" data-tab="settings" role="tab"
-          title="Gemini API キー・モデル・システムプロンプトの設定">設定</button>
+          data-i18n="tab.settings" data-i18n-title="tab.settingsTitle">設定</button>
       </nav>
 
       <!-- タブ: チャット。LLMとのやりとりは「コピペモード」「APIモード」の2種類 -->
       <div class="tab-panel tab-panel-active" data-panel="chat">
         <div id="chat-mode-toggle" class="mode-toggle" role="tablist">
-          <button class="mode-btn mode-btn-active" data-mode="copy" type="button">📋 コピペモード</button>
-          <button class="mode-btn" data-mode="api" type="button">🔌 API モード</button>
+          <button class="mode-btn mode-btn-active" data-mode="copy" type="button" data-i18n="chat.modeCopy">📋 コピペモード</button>
+          <button class="mode-btn" data-mode="api" type="button" data-i18n="chat.modeApi">🔌 API モード</button>
         </div>
 
         <!-- 指示のヒント: クリックで入力欄に引用できるテンプレート集(main.js が生成) -->
         <details id="hint-lib">
-          <summary>💡 指示のヒント — できること / できないこと</summary>
+          <summary data-i18n="chat.hintSummary">💡 指示のヒント — できること / できないこと</summary>
           <div id="hint-lib-body"></div>
         </details>
 
         <div id="chat-log" aria-live="polite"></div>
 
         <form id="chat-form">
-          <textarea id="chat-input" rows="3"
-            placeholder="例: 一辺 40mm の立方体の中心に直径 20mm の貫通穴をあけて"></textarea>
+          <textarea id="chat-input" rows="3" data-i18n-ph="chat.placeholder"></textarea>
           <div class="row-end">
             <button type="submit" id="btn-send" class="btn btn-primary">プロンプトをコピー</button>
           </div>
@@ -184,40 +142,36 @@
 
         <!-- コピペモード専用: 外部チャット(ChatGPT/Gemini等)の回答を貼り付けて実行 -->
         <div id="paste-back" class="paste-back">
-          <label class="paste-back-label" for="paste-input">③ 外部チャットの回答を貼り付け</label>
-          <textarea id="paste-input" rows="4"
-            placeholder="LLM の回答(コードを含む全文)をここに貼り付け"></textarea>
+          <label class="paste-back-label" for="paste-input" data-i18n="paste.label">③ 外部チャットの回答を貼り付け</label>
+          <textarea id="paste-input" rows="4" data-i18n-ph="paste.placeholder"></textarea>
           <div class="row-end">
-            <button id="btn-paste-run" class="btn btn-primary" type="button">貼り付けを実行</button>
+            <button id="btn-paste-run" class="btn btn-primary" type="button" data-i18n="paste.run">貼り付けを実行</button>
           </div>
         </div>
       </div>
 
       <!-- タブ: 編集(チャット不要の直接操作) -->
       <div class="tab-panel" data-panel="edit">
-        <p class="hint">
-          チャットを使わずに直接編集します。操作はすべてヘッダの
-          <b>↶ / ↷</b>(Ctrl+Z / Ctrl+Y)で元に戻せます。
-        </p>
+        <p class="hint" data-i18n-html="edit.hint"></p>
         <p id="edit-size" class="edit-size">モデル未読み込み</p>
 
         <!-- 拡大・縮小 -->
         <details class="edit-sec" open>
-          <summary>拡大・縮小</summary>
+          <summary data-i18n="edit.secScale">拡大・縮小</summary>
           <div class="edit-row">
-            <span class="edit-label">全体倍率</span>
+            <span class="edit-label" data-i18n="edit.scaleAll">全体倍率</span>
             <input id="scale-all" type="number" value="1" step="0.1" min="0.01" />
-            <button id="btn-scale-all" class="btn btn-ghost" type="button">適用</button>
+            <button id="btn-scale-all" class="btn btn-ghost" type="button" data-i18n="edit.apply">適用</button>
           </div>
-          <div class="edit-note">XYZ 個別(1 のままの軸は変わりません)</div>
+          <div class="edit-note" data-i18n="edit.noteXyz">XYZ 個別(1 のままの軸は変わりません)</div>
           <div class="edit-xyz">
             <label><span>X</span><input id="scale-x" type="number" value="1" step="0.1" min="0.01" /></label>
             <label><span>Y</span><input id="scale-y" type="number" value="1" step="0.1" min="0.01" /></label>
             <label><span>Z</span><input id="scale-z" type="number" value="1" step="0.1" min="0.01" /></label>
           </div>
-          <div class="row-end"><button id="btn-scale-xyz" class="btn btn-primary" type="button">XYZ を適用</button></div>
+          <div class="row-end"><button id="btn-scale-xyz" class="btn btn-primary" type="button" data-i18n="edit.applyXyz">XYZ を適用</button></div>
 
-          <div class="edit-note">寸法(mm)を直接指定して合わせることもできます</div>
+          <div class="edit-note" data-i18n="edit.noteSize">寸法(mm)を直接指定して合わせることもできます</div>
           <div class="edit-xyz">
             <label><span>X</span><input id="size-x" type="number" step="1" min="0.1" /></label>
             <label><span>Y</span><input id="size-y" type="number" step="1" min="0.1" /></label>
@@ -225,22 +179,20 @@
           </div>
           <div class="row-between">
             <label class="edit-check">
-              <input id="size-keep-ratio" type="checkbox" checked /> <span>比率を保つ</span>
+              <input id="size-keep-ratio" type="checkbox" checked /> <span data-i18n="edit.keepRatio">比率を保つ</span>
             </label>
-            <button id="btn-size-apply" class="btn btn-primary" type="button">寸法を適用</button>
+            <button id="btn-size-apply" class="btn btn-primary" type="button" data-i18n="edit.applySize">寸法を適用</button>
           </div>
         </details>
 
         <!-- 消しゴム -->
         <details class="edit-sec">
-          <summary>消しゴム(クリックで削る)</summary>
-          <div class="edit-note">
-            ON にしてモデルをクリックすると、その位置を球状に削ります。
-            削るたびに CSG 計算が走るため、複雑なモデルでは数秒かかります。
-          </div>
+          <summary data-i18n="edit.secEraser">消しゴム(クリックで削る)</summary>
+          <div class="edit-note" data-i18n="edit.eraserNote"></div>
           <div class="edit-row">
-            <button id="btn-eraser" class="btn btn-ghost" type="button">消しゴム: OFF</button>
-            <span class="edit-label">半径</span>
+            <button id="btn-eraser" class="btn btn-ghost" type="button"
+              data-i18n="edit.eraserOff">消しゴム: OFF</button>
+            <span class="edit-label" data-i18n="edit.radius">半径</span>
             <input id="eraser-size" type="number" value="5" step="1" min="0.5" />
             <span class="edit-unit">mm</span>
           </div>
@@ -248,99 +200,90 @@
 
         <!-- パーツ分割 -->
         <details class="edit-sec">
-          <summary>パーツ分割・個別編集</summary>
-          <div class="edit-note">
-            つながっていない部分(板・部品など)を自動で認識して一覧にします。
-            選んだパーツだけを拡大縮小・削除できます。
-          </div>
+          <summary data-i18n="edit.secParts">パーツ分割・個別編集</summary>
+          <div class="edit-note" data-i18n="edit.partsNote"></div>
           <div class="row-end">
-            <button id="btn-split" class="btn btn-primary" type="button">パーツに分割して認識</button>
+            <button id="btn-split" class="btn btn-primary" type="button" data-i18n="edit.splitRun">パーツに分割して認識</button>
           </div>
           <div id="parts-list" class="parts-list hidden"></div>
           <div id="parts-ops" class="hidden">
-            <div class="edit-note">選択中のパーツを、そのパーツの中心を基準に拡大縮小します</div>
+            <div class="edit-note" data-i18n="edit.partsOpsNote"></div>
             <div class="edit-xyz">
               <label><span>X</span><input id="part-sx" type="number" value="1" step="0.1" min="0.01" /></label>
               <label><span>Y</span><input id="part-sy" type="number" value="1" step="0.1" min="0.01" /></label>
               <label><span>Z</span><input id="part-sz" type="number" value="1" step="0.1" min="0.01" /></label>
             </div>
             <div class="row-between">
-              <button id="btn-part-delete" class="btn btn-ghost" type="button">このパーツを削除</button>
-              <button id="btn-part-scale" class="btn btn-primary" type="button">パーツに適用</button>
+              <button id="btn-part-delete" class="btn btn-ghost" type="button" data-i18n="edit.partDelete">このパーツを削除</button>
+              <button id="btn-part-scale" class="btn btn-primary" type="button" data-i18n="edit.partApply">パーツに適用</button>
             </div>
           </div>
         </details>
 
         <!-- 図形・テキストの追加 -->
         <details class="edit-sec">
-          <summary>図形・テキストを追加</summary>
+          <summary data-i18n="edit.secAdd">図形・テキストを追加</summary>
           <div class="edit-row">
-            <span class="edit-label">図形</span>
+            <span class="edit-label" data-i18n="edit.shape">図形</span>
             <select id="prim-kind">
-              <option value="box">直方体</option>
-              <option value="cylinder">円柱</option>
-              <option value="sphere">球</option>
-              <option value="cone">円錐</option>
+              <option value="box" data-i18n="edit.shapeBox">直方体</option>
+              <option value="cylinder" data-i18n="edit.shapeCylinder">円柱</option>
+              <option value="sphere" data-i18n="edit.shapeSphere">球</option>
+              <option value="cone" data-i18n="edit.shapeCone">円錐</option>
             </select>
           </div>
           <div class="edit-xyz">
-            <label><span>幅/径</span><input id="prim-w" type="number" value="20" step="1" min="0.1" /></label>
-            <label><span>高さ</span><input id="prim-h" type="number" value="20" step="1" min="0.1" /></label>
-            <label><span>奥行</span><input id="prim-d" type="number" value="20" step="1" min="0.1" /></label>
+            <label><span data-i18n="edit.dimW">幅/径</span><input id="prim-w" type="number" value="20" step="1" min="0.1" /></label>
+            <label><span data-i18n="edit.dimH">高さ</span><input id="prim-h" type="number" value="20" step="1" min="0.1" /></label>
+            <label><span data-i18n="edit.dimD">奥行</span><input id="prim-d" type="number" value="20" step="1" min="0.1" /></label>
           </div>
-          <div class="edit-note">配置する位置(mm・原点が中心)</div>
+          <div class="edit-note" data-i18n="edit.posNote">配置する位置(mm・原点が中心)</div>
           <div class="edit-xyz">
             <label><span>X</span><input id="prim-x" type="number" value="0" step="1" /></label>
             <label><span>Y</span><input id="prim-y" type="number" value="0" step="1" /></label>
             <label><span>Z</span><input id="prim-z" type="number" value="0" step="1" /></label>
           </div>
           <div class="row-between">
-            <button id="btn-prim-sub" class="btn btn-ghost" type="button">この形で削る</button>
-            <button id="btn-prim-add" class="btn btn-primary" type="button">追加(結合)</button>
+            <button id="btn-prim-sub" class="btn btn-ghost" type="button" data-i18n="edit.primSub">この形で削る</button>
+            <button id="btn-prim-add" class="btn btn-primary" type="button" data-i18n="edit.primAdd">追加(結合)</button>
           </div>
 
-          <div class="edit-note edit-sep">
-            テキスト(<b>半角英数字のみ</b>。日本語フォントは未対応です)
-          </div>
+          <div class="edit-note edit-sep" data-i18n-html="edit.textNote"></div>
           <div class="edit-row">
             <input id="text-value" type="text" placeholder="TEXT" maxlength="40" />
           </div>
           <div class="edit-xyz">
-            <label><span>文字高</span><input id="text-size" type="number" value="10" step="1" min="1" /></label>
-            <label><span>厚み</span><input id="text-depth" type="number" value="3" step="0.5" min="0.1" /></label>
-            <label><span>Y位置</span><input id="text-y" type="number" value="0" step="1" /></label>
+            <label><span data-i18n="edit.textSize">文字高</span><input id="text-size" type="number" value="10" step="1" min="1" /></label>
+            <label><span data-i18n="edit.textDepth">厚み</span><input id="text-depth" type="number" value="3" step="0.5" min="0.1" /></label>
+            <label><span data-i18n="edit.textY">Y位置</span><input id="text-y" type="number" value="0" step="1" /></label>
           </div>
           <div class="row-between">
-            <button id="btn-text-sub" class="btn btn-ghost" type="button">文字を彫る</button>
-            <button id="btn-text-add" class="btn btn-primary" type="button">文字を追加</button>
+            <button id="btn-text-sub" class="btn btn-ghost" type="button" data-i18n="edit.textSub">文字を彫る</button>
+            <button id="btn-text-add" class="btn btn-primary" type="button" data-i18n="edit.textAdd">文字を追加</button>
           </div>
         </details>
       </div>
 
       <!-- タブ: コード直接入力(Gemini 不使用) -->
       <div class="tab-panel" data-panel="code">
-        <p class="hint">
-          <b>LLM 側の JavaScript 回答</b>をここに貼り付けて「STL反映実行」を押すと、3D ビューに反映されます。
-          コードには <code>scene</code> / <code>THREE</code> / <code>CSG</code> /
-          <code>targetMesh</code> / <code>setResult(mesh)</code> が渡されます。
-        </p>
+        <p class="hint" data-i18n-html="code.hint"></p>
         <textarea id="code-input" rows="12" spellcheck="false"></textarea>
         <div class="row-between">
           <div class="btn-group">
             <button id="btn-sample" class="btn btn-ghost" type="button"
-              title="動作確認用のサンプルコードを入れ直す">サンプル挿入</button>
+              data-i18n="code.sample" data-i18n-title="code.sampleTitle">サンプル挿入</button>
             <button id="btn-code-clear" class="btn btn-ghost" type="button"
-              title="入力欄を空にする">クリア</button>
+              data-i18n="code.clear" data-i18n-title="code.clearTitle">クリア</button>
           </div>
           <button id="btn-run" class="btn btn-primary" type="button"
-            title="コードを実行して 3D ビューのメッシュを差し替える">STL反映実行</button>
+            data-i18n="code.run" data-i18n-title="code.runTitle">STL反映実行</button>
         </div>
 
         <!-- 実行結果の所要時間・統計・console 出力(デバッグ用) -->
         <div id="debug-box" class="hidden">
           <div class="debug-head">
-            <span>🔎 実行レポート</span>
-            <button id="btn-debug-close" class="btn-x" type="button" title="閉じる">×</button>
+            <span data-i18n="code.debugHead">🔎 実行レポート</span>
+            <button id="btn-debug-close" class="btn-x" type="button" data-i18n-title="common.close">×</button>
           </div>
           <dl id="debug-stats"></dl>
           <pre id="debug-log" class="hidden"></pre>
@@ -350,13 +293,13 @@
       <!-- タブ: 設定(Gemini API キー / モデル) -->
       <div class="tab-panel" data-panel="settings">
         <label class="field">
-          <span>Gemini API キー</span>
+          <span data-i18n="set.apiKey">Gemini API キー</span>
           <input id="api-key" type="password" autocomplete="off"
             placeholder="AIza..." />
-          <small>ブラウザの localStorage にのみ保存されます(サーバ送信なし)。</small>
+          <small data-i18n="set.apiKeyNote">ブラウザの localStorage にのみ保存されます(サーバ送信なし)。</small>
         </label>
         <label class="field">
-          <span>モデル</span>
+          <span data-i18n="set.model">モデル</span>
           <select id="api-model">
             <option value="gemini-2.5-flash">gemini-2.5-flash</option>
             <option value="gemini-2.5-pro">gemini-2.5-pro</option>
@@ -364,17 +307,17 @@
           </select>
         </label>
         <details class="field">
-          <summary>システムプロンプト(編集可)</summary>
+          <summary data-i18n="set.sysPrompt">システムプロンプト(編集可)</summary>
           <textarea id="sys-prompt" rows="12" spellcheck="false"></textarea>
-          <button id="btn-reset-prompt" class="btn btn-ghost" type="button">既定に戻す</button>
+          <button id="btn-reset-prompt" class="btn btn-ghost" type="button" data-i18n="set.resetPrompt">既定に戻す</button>
         </details>
       </div>
 
       <!-- エラー/ログ表示(動的実行のトレースをそのまま出す) -->
       <div id="error-box" class="hidden" role="alert">
         <div class="error-head">
-          <span>⚠ 実行エラー</span>
-          <button id="btn-error-close" class="btn-x" title="閉じる">×</button>
+          <span data-i18n="err.head">⚠ 実行エラー</span>
+          <button id="btn-error-close" class="btn-x" data-i18n-title="common.close">×</button>
         </div>
         <pre id="error-trace"></pre>
       </div>
@@ -382,41 +325,17 @@
   </div>
 
   <!-- ══ 統一フッター(spctrl-site 踏襲・ダークオーバーレイ)══ -->
+  <!-- 文言は i18n.js が data-i18n 経由で流し込む(言語切替に追従させるため) -->
   <footer class="su-foot su-foot--overlay" data-lang="ja">
     <div class="su-foot-right">
       <span class="su-foot-support">
-        <a href="https://ko-fi.com/subutomo" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">☕ </span><span data-i18n="tip">チップ</span></a>
-        <span class="su-foot-sep" aria-hidden="true">・</span>
+        <a href="https://ko-fi.com/subutomo" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">☕ </span><span data-i18n="foot.tip">チップ</span></a>
+        <span class="su-foot-sep" aria-hidden="true" data-i18n="foot.sep">・</span>
         <a href="https://github.com/sponsors/t-sumita" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">❤️ </span>Sponsors</a>
       </span>
-      <a class="su-foot-feedback" href="https://docs.google.com/forms/d/e/1FAIpQLSf_thpSe4TfQ_EloElTBsCiMKgypYTKLCs0dSTmaF_FXZSvIg/viewform?usp=pp_url&entry.2036331541=chat-3d" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">📣 </span><span data-i18n="feedback">ご意見・ご要望</span></a>
+      <a class="su-foot-feedback" href="https://docs.google.com/forms/d/e/1FAIpQLSf_thpSe4TfQ_EloElTBsCiMKgypYTKLCs0dSTmaF_FXZSvIg/viewform?usp=pp_url&entry.2036331541=chat-3d" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">📣 </span><span data-i18n="foot.feedback">ご意見・ご要望</span></a>
     </div>
   </footer>
-  <script>
-    (function () {
-      'use strict';
-      var foot = document.querySelector('.su-foot');
-      if (!foot) return;
-      var I18N = {
-        ja: { tip: 'チップ', feedback: 'ご意見・ご要望', toggle: 'EN' },
-        en: { tip: 'Tip',   feedback: 'Feedback',       toggle: '日本語' }
-      };
-      function detectLang() {
-        var l = (foot.getAttribute('data-lang') || document.documentElement.lang || 'ja').toLowerCase();
-        return l.indexOf('ja') === 0 ? 'ja' : 'en';
-      }
-      function applyLang(lang) {
-        var dict = I18N[lang] || I18N.ja, nodes = foot.querySelectorAll('[data-i18n]');
-        for (var i = 0; i < nodes.length; i++) {
-          var k = nodes[i].getAttribute('data-i18n');
-          if (dict[k] != null) nodes[i].textContent = dict[k];
-        }
-        foot.setAttribute('data-lang', lang);
-        document.documentElement.lang = lang;
-      }
-      applyLang(detectLang());
-    }());
-  </script>
 
   <!-- Subutomo サイト選択バッジ(spctrl-site と同一の共有フッター体験) -->
   <script>
@@ -425,7 +344,7 @@
       sitesJsonPath: 'config/subutomo-sites.json',
       logoPath: './common/assets/logo.png',
       theme: 'dark-bg',
-      version: '0.9.1',
+      version: '0.10.0',
       privacy: { localStorage: true, analytics: false },
       onSecretAction: null
     };

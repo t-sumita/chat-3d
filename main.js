@@ -14,6 +14,11 @@ import { FontLoader } from 'three/addons/loaders/FontLoader.js';
 import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
 import { CSG } from 'three-csg-ts';
 
+// i18n.js は index.html が main.js に付けたクエリ(?v=…)を引き継いで読み込む。
+// 静的 import では ?v= が付かず、バージョンを上げても古い辞書がキャッシュから使われる。
+const { t, getLang, setLang, onLangChange, applyStaticI18n } =
+  await import(new URL('./i18n.js' + new URL(import.meta.url).search, import.meta.url).href);
+
 // ─────────────────────────────────────────────────────────────
 // 定数
 // ─────────────────────────────────────────────────────────────
@@ -22,7 +27,7 @@ const LS_KEY = 'chat3d.settings.v1';          // localStorage キー
 const MODEL_COLOR = 0x9ec5ff;                  // 生成メッシュの既定色
 const EXEC_HISTORY_MAX = 20;                   // 所要時間の推定に使う実行履歴の保持件数
 const UNDO_MAX = 12;                           // undo 履歴の保持段数(ジオメトリ実体を持つため控えめ)
-const PROMPT_VERSION = 3;                      // DEFAULT_SYSTEM_PROMPT を更新したら上げる
+const PROMPT_VERSION = 4;                      // DEFAULT_SYSTEM_PROMPT を更新したら上げる
 const TRI_WARN = 20000;                        // これを超えたら「重い処理」として強い警告を出す
 const TRI_CONFIRM = 60000;                     // これを超えたら実行前に明示的な確認を求める
 const WELD_PRECISION = 1e4;                    // パーツ分割・水密化で頂点を同一視する量子化精度
@@ -32,9 +37,10 @@ const TEXT_FONT_URL =                          // テキスト生成用フォン
   'https://unpkg.com/three@0.160.0/examples/fonts/helvetiker_regular.typeface.json';
 
 // LLM にコードを書かせるためのシステムプロンプト・テンプレート。
-// 開発者が後から調整しやすいよう、ここに定数として明示的に定義する。
+// 開発者が後から調整しやすいよう、ここに定数として明示的に定義する
+// (画面の表示文言は i18n.js、LLM 向けのプロンプト類はこのファイル、という分担)。
 // {{CONTEXT}} は送信直前にシーン状態(空 or targetMesh あり)で差し替える。
-const DEFAULT_SYSTEM_PROMPT = `あなたは Three.js と three-csg-ts に精通した 3D モデリングアシスタントです。
+const DEFAULT_SYSTEM_PROMPT_JA = `あなたは Three.js と three-csg-ts に精通した 3D モデリングアシスタントです。
 ユーザーの日本語指示を、ブラウザ上で即実行できる JavaScript コードに変換します。
 
 # 実行環境
@@ -122,10 +128,103 @@ CSG は 1 回ごとにメッシュ全体を再分割するため、使わずに�
 
 {{CONTEXT}}`;
 
+// 英語 UI 用のシステムプロンプト。内容は日本語版と 1 対 1 に対応させること
+// (三角形数を抑えるルールが片方だけ古い、という状態を作らない)。
+const DEFAULT_SYSTEM_PROMPT_EN = `You are a 3D modelling assistant fluent in Three.js and three-csg-ts.
+You turn the user's instructions into JavaScript that runs immediately in the browser.
+
+# Runtime
+- The code is executed through new Function and receives these arguments:
+  - scene      : THREE.Scene (the scene on screen)
+  - THREE      : the Three.js namespace (r160)
+  - CSG        : the CSG class from three-csg-ts
+  - targetMesh : the mesh currently being edited (null when there is none)
+  - setResult  : setResult(mesh) registers exactly one finished mesh
+  - mergeMeshes: mergeMeshes([mesh, ...]) merges several meshes into one WITHOUT CSG
+                 (non-overlapping shapes only; use it to collapse many cutters
+                 into a single subtract call)
+- One unit is one millimetre (40 mm = 40).
+
+# Hard rules
+1. Always register exactly one finished mesh with setResult(mesh).
+   Do not add/remove anything on scene yourself; leave that to setResult.
+2. Before every CSG operation (union/subtract/intersect), call mesh.updateMatrix()
+   on each mesh involved so that position and rotation are baked into the matrix.
+   e.g. CSG.subtract(box, hole)  // both box and hole have had updateMatrix() called.
+3. Materials are optional (one is applied for you when omitted).
+4. No import statements, no wrapping function, no prose, no markdown headings.
+   Reply with a single \`\`\`js code block and nothing before or after it.
+
+# Rules for minimising the triangle count (most important)
+The result gets 3D printed. Because it is built up in layers, detail finer than
+0.1-0.2 mm never appears in the print, so triangles spent on smoothness are wasted.
+Meanwhile a high triangle count causes real damage: (1) execution takes minutes and
+crashes the browser, (2) the slicer warns about it and simplifying there punches
+holes in the model.
+
+**Prefer a faceted shape with few triangles over a smooth one.** Work through the
+following steps in order.
+
+## Step 1: first ask whether CSG can be avoided entirely (biggest win)
+Each CSG call re-tessellates the whole mesh, so not using it is always best.
+- **Constant cross-section** (plates, brackets, spacers, gaskets, extrusions)
+  -> THREE.Shape with .holes plus ExtrudeGeometry. **A perforated plate needs zero CSG.**
+- **Rotationally symmetric** (pipes, tubes, knobs, cups, stepped shafts)
+  -> THREE.LatheGeometry. Zero CSG even when hollow.
+- Translation, rotation, scaling and mirroring -> geometry.translate() / rotateX() / scale().
+  None of these need CSG.
+
+A four-hole plate with zero CSG:
+  const s = new THREE.Shape();
+  s.moveTo(-30, -20); s.lineTo(30, -20); s.lineTo(30, 20); s.lineTo(-30, 20);
+  for (const [x, y] of [[-20,-10],[20,-10],[-20,10],[20,10]]) {
+    const h = new THREE.Path();
+    h.absarc(x, y, 2.5, 0, Math.PI * 2, true);
+    s.holes.push(h);
+  }
+  const g = new THREE.ExtrudeGeometry(s,
+    { depth: 5, bevelEnabled: false, steps: 1, curveSegments: 12 });
+
+## Step 2: if CSG is needed, minimise the number of calls
+- **When there are several holes or notches, merge the cutters with mergeMeshes([...])
+  and subtract exactly once.** One subtract is dramatically cheaper than three.
+  Note: mergeMeshes is for non-overlapping shapes only (use CSG.union when they overlap).
+- Never build many meshes in a loop and CSG them one by one.
+
+## Step 3: always state the segment counts, at the minimum the radius allows
+The defaults (32 and such) are meant for decoration and are excessive. Follow this:
+- radialSegments for CylinderGeometry / ConeGeometry / arcs:
+    radius <= 2 mm -> 8 / <= 5 mm -> 12 / <= 10 mm -> 16 / <= 25 mm -> 24 / above -> 32
+- SphereGeometry: (radius, 12, 8). Even a large sphere stops at (16, 10).
+- BoxGeometry / PlaneGeometry segments stay at 1 (the default; there is no reason to raise it).
+- heightSegments for CylinderGeometry / ConeGeometry is 1.
+- ExtrudeGeometry: steps: 1, bevelEnabled: false.
+- TextGeometry: curveSegments: 2, bevelEnabled: false.
+- Avoid shapes that are dense by nature such as TorusGeometry; if required, use about (8, 16).
+
+## Step 4: when the shape is negotiable, pick the cheaper option
+- **Prefer a chamfer over a fillet.** A round consumes triangles proportional to its
+  segment count, while a chamfer is flat and essentially free. Even when asked to
+  "round the corners", a chamfer is acceptable unless roundness is clearly required.
+- Knurling, threads, fine patterns and decorative detail explode the triangle count;
+  do not add them unless they were explicitly requested.
+
+## Step 5: etiquette when using CSG
+- Make the cutter for a through-hole overshoot by at least 0.5 mm at both ends.
+  Exactly coincident faces produce invalid triangles and break the STL.
+- Leave openEnded as false (CSG needs closed solids).
+
+# Output format
+\`\`\`js
+// only the executable body goes here (as top-level statements)
+\`\`\`
+
+{{CONTEXT}}`;
+
 // 指示のヒント。LLM は形状を直接見られないため、「形を見なくても成立する指示」＝
 // 全体変形 / bbox 基準 / パラメトリックなパターン / 座標指定 に限って例を出す。
 // クリックでチャット入力欄に引用される。
-const INSTRUCTION_TEMPLATES = [
+const INSTRUCTION_TEMPLATES_JA = [
   {
     title: '全体変形(確実に動く)',
     items: [
@@ -162,9 +261,46 @@ const INSTRUCTION_TEMPLATES = [
   },
 ];
 
+const INSTRUCTION_TEMPLATES_EN = [
+  {
+    title: 'Whole-model transforms (always work)',
+    items: [
+      'Scale the whole model by 1.2',
+      'Stretch it 1.5x along Z only',
+      'Rotate it 90 degrees about the X axis',
+      'Mirror it left to right',
+    ],
+  },
+  {
+    title: 'Bounding-box based edits (nearly always work)',
+    items: [
+      'Drill a 20 mm through-hole in the centre',
+      'Add a 10 mm diameter, 5 mm deep counterbore in the middle of the top face',
+      'Cut it at the Z=0 plane and keep the top half',
+      'Add a 3 mm thick base plate, slightly larger, under the bottom face',
+      'Intersect it with a 50 mm cube to trim the overhang',
+    ],
+  },
+  {
+    title: 'Patterns (always work)',
+    items: [
+      'Put 6 evenly spaced 5 mm holes on a 25 mm radius circle around the centre',
+      'Lay out 3 mm holes on a 10 mm pitch grid',
+      'Add 4 ribs 2 mm wide on the side faces, every 90 degrees',
+    ],
+  },
+  {
+    title: 'Add or remove at explicit coordinates (always work)',
+    items: [
+      'Grow an 8 mm diameter, 10 mm tall cylinder at (15, 0, 20)',
+      'Subtract a 12 mm cube centred at (0, 10, 0)',
+    ],
+  },
+];
+
 // LLM は読み込んだ形状を「見て」いないため、原理的に指示できないこと。
 // 期待値をあらかじめ揃えるために UI 上で明示する。
-const INSTRUCTION_LIMITS = [
+const INSTRUCTION_LIMITS_JA = [
   { what: 'この突起を削除して', why: '形状認識の仕組みが無く、部分を指し示せない' },
   { what: '角を丸めて(フィレット)', why: 'three-csg-ts にフィレット機能が無い' },
   { what: '肉厚 2mm でシェル化して', why: 'オフセット形状の生成に対応していない' },
@@ -172,8 +308,16 @@ const INSTRUCTION_LIMITS = [
   { what: '元の形に合わせていい感じに', why: '元形状が見えないので「合わせる」判断ができない' },
 ];
 
-// コード直接入力タブに最初から入れておくサンプル(Box ∪ Sphere)。
-const SAMPLE_CODE = `// 60x40x6mm の板に、直径6mm の穴を2つあける例。
+const INSTRUCTION_LIMITS_EN = [
+  { what: 'Remove this boss', why: 'there is no shape recognition, so a feature cannot be pointed at' },
+  { what: 'Round the corners (fillet)', why: 'three-csg-ts has no fillet operation' },
+  { what: 'Shell it with a 2 mm wall', why: 'offset surfaces are not supported' },
+  { what: 'Put a hole in the largest face', why: 'faces cannot be detected or selected' },
+  { what: 'Make it match the original nicely', why: 'the original shape is invisible, so "match" cannot be judged' },
+];
+
+// コード直接入力タブに最初から入れておくサンプル。
+const SAMPLE_CODE_JA = `// 60x40x6mm の板に、直径6mm の穴を2つあける例。
 // 穴ごとに subtract せず、切削体をまとめて CSG は1回だけにする(三角形数の抑制)。
 const plate = new THREE.Mesh(new THREE.BoxGeometry(60, 40, 6));
 
@@ -193,6 +337,59 @@ plate.updateMatrix();
 cutter.updateMatrix();
 
 setResult(CSG.subtract(plate, cutter));`;
+
+const SAMPLE_CODE_EN = `// Drill two 6 mm holes in a 60x40x6 mm plate.
+// Instead of one subtract per hole, merge the cutters and call CSG once
+// (this is what keeps the triangle count down).
+const plate = new THREE.Mesh(new THREE.BoxGeometry(60, 40, 6));
+
+// Radius is 3 mm, so 12 segments is plenty. Make it 10 mm long -- longer than the
+// 6 mm plate -- so it definitely goes all the way through.
+const holes = [-18, 18].map((x) => {
+  const h = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 10, 12));
+  h.rotation.x = Math.PI / 2;      // tip the cylinder axis (Y) over to Z
+  h.position.set(x, 0, 0);
+  return h;
+});
+
+// Cutters that do not touch each other can be merged without CSG (much cheaper)
+const cutter = mergeMeshes(holes);
+
+// Bake the matrices before CSG (important)
+plate.updateMatrix();
+cutter.updateMatrix();
+
+setResult(CSG.subtract(plate, cutter));`;
+
+/** 現在の言語の既定システムプロンプトを返す */
+function defaultSystemPrompt() {
+  return getLang() === 'en' ? DEFAULT_SYSTEM_PROMPT_EN : DEFAULT_SYSTEM_PROMPT_JA;
+}
+
+/** 与えられた文字列が、どちらかの言語の既定プロンプトそのものか */
+function isDefaultPrompt(text) {
+  return text === DEFAULT_SYSTEM_PROMPT_JA || text === DEFAULT_SYSTEM_PROMPT_EN;
+}
+
+/** 現在の言語のサンプルコードを返す */
+function sampleCode() {
+  return getLang() === 'en' ? SAMPLE_CODE_EN : SAMPLE_CODE_JA;
+}
+
+/** 与えられた文字列が、どちらかの言語のサンプルコードそのものか(未編集の判定用) */
+function isSampleCode(text) {
+  return text === SAMPLE_CODE_JA || text === SAMPLE_CODE_EN;
+}
+
+/** 現在の言語の指示テンプレート */
+function instructionTemplates() {
+  return getLang() === 'en' ? INSTRUCTION_TEMPLATES_EN : INSTRUCTION_TEMPLATES_JA;
+}
+
+/** 現在の言語の「できないこと」一覧 */
+function instructionLimits() {
+  return getLang() === 'en' ? INSTRUCTION_LIMITS_EN : INSTRUCTION_LIMITS_JA;
+}
 
 // ─────────────────────────────────────────────────────────────
 // 状態
@@ -404,7 +601,7 @@ async function withBusy(note, fn, heavy) {
   try {
     return fn();
   } catch (err) {
-    showError(err, '編集処理でエラーが発生しました');
+    showError(err, t('err.editTitle'));
     return null;
   } finally {
     setExecOverlay(false);
@@ -425,13 +622,14 @@ function updateEditReadout() {
   const el = document.getElementById('edit-size');
   if (!el) return;
   if (!targetMesh) {
-    el.textContent = 'モデル未読み込み';
+    el.textContent = t('edit.noModel');
     return;
   }
   const s = meshSize(targetMesh);
-  el.textContent =
-    `寸法 ${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)} mm` +
-    ` / ${triangleCount(targetMesh).toLocaleString()} 三角形`;
+  el.textContent = t('edit.readout', {
+    x: s.x.toFixed(1), y: s.y.toFixed(1), z: s.z.toFixed(1),
+    tris: triangleCount(targetMesh).toLocaleString(),
+  });
 
   // 寸法入力欄にも現在値を流し込んでおく(そのまま編集して適用できる)
   const set = (id, v) => {
@@ -445,11 +643,11 @@ function updateEditReadout() {
 async function scaleModel(sx, sy, sz) {
   if (!requireMesh()) return;
   if (![sx, sy, sz].every((v) => Number.isFinite(v) && v > 0)) {
-    showError(new Error('倍率は 0 より大きい数値で指定してください。'), '入力エラー');
+    showError(new Error(t('err.scalePositive')), t('err.inputTitle'));
     return;
   }
   if (sx === 1 && sy === 1 && sz === 1) return;
-  await withBusy('拡大縮小を適用しています…', () => {
+  await withBusy(t('busy.scale'), () => {
     const g = targetMesh.geometry.clone();
     g.scale(sx, sy, sz);
     commitGeometry(g);
@@ -475,8 +673,7 @@ async function resizeModel(tx, ty, tz, keepRatio) {
 function requireMesh() {
   if (targetMesh) return true;
   showError(
-    new Error('先に STL/3MF を読み込むか、図形を追加してモデルを用意してください。'),
-    'モデルがありません');
+    new Error(t('err.noMesh')), t('err.noMeshTitle'));
   return false;
 }
 
@@ -509,7 +706,7 @@ function mergeMeshes(meshes) {
   const list = (Array.isArray(meshes) ? meshes : [meshes])
     .filter((m) => m && m.geometry && m.geometry.getAttribute('position'));
   if (list.length === 0) {
-    throw new Error('mergeMeshes: 合成できるメッシュが渡されていません。');
+    throw new Error(t('err.mergeNone'));
   }
 
   const geos = list.map((m) => {
@@ -532,7 +729,7 @@ function mergeMeshes(meshes) {
   });
 
   const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
-  if (!merged) throw new Error('mergeMeshes: ジオメトリの合成に失敗しました。');
+  if (!merged) throw new Error(t('err.mergeFail'));
   if (geos.length > 1) geos.forEach((g) => g.dispose());
   return new THREE.Mesh(merged, defaultMaterial());
 }
@@ -541,7 +738,7 @@ function mergeMeshes(meshes) {
 async function subtractShape(mesh, note) {
   if (!requireMesh()) return;
   // 消しゴムもここを通る。CSG は規模に応じて急激に重くなるため必ずガードする
-  const pre = await preflight(triangleCount(targetMesh), '削り取り');
+  const pre = await preflight(triangleCount(targetMesh), t('op.subtract'));
   if (!pre.ok) { disposeMesh(mesh); return; }
   await withBusy(`${note}${pre.note ? ` (${pre.note})` : ''}`, () => {
     const g = csgOp('subtract', targetMesh, mesh);
@@ -560,7 +757,7 @@ async function unionShape(mesh, note) {
     frameObject(targetMesh);
     return;
   }
-  const pre = await preflight(triangleCount(targetMesh), '結合');
+  const pre = await preflight(triangleCount(targetMesh), t('op.union'));
   if (!pre.ok) { disposeMesh(mesh); return; }
   await withBusy(`${note}${pre.note ? ` (${pre.note})` : ''}`, () => {
     const g = csgOp('union', targetMesh, mesh);
@@ -677,7 +874,7 @@ function removePartHighlight() {
 /** パーツを分割して一覧 UI を作る */
 async function runSplitParts() {
   if (!requireMesh()) return;
-  await withBusy('パーツを認識しています…', () => {
+  await withBusy(t('busy.parts'), () => {
     clearParts();
     const geoms = splitConnectedComponents(targetMesh.geometry);
     parts = geoms.map((g) => {
@@ -690,19 +887,22 @@ async function runSplitParts() {
   });
 }
 
-/** パーツ一覧を描画する */
-function renderPartsList() {
+/**
+ * パーツ一覧を描画する
+ * @param {boolean} announce チャット欄に「N 個のパーツ」と通知するか(言語切替時の再描画では false)
+ */
+function renderPartsList(announce = true) {
   const list = document.getElementById('parts-list');
   list.innerHTML = parts.map((p, i) =>
     `<button class="part-item" type="button" data-i="${i}">` +
     `<span class="part-no">#${i + 1}</span>` +
     `<span>${p.size.x.toFixed(1)}×${p.size.y.toFixed(1)}×${p.size.z.toFixed(1)}mm</span>` +
-    `<span class="part-meta">${p.tris.toLocaleString()} 三角形</span></button>`).join('');
+    `<span class="part-meta">${t('unit.tris', { n: p.tris.toLocaleString() })}</span></button>`).join('');
   list.classList.remove('hidden');
   list.querySelectorAll('.part-item').forEach((btn) => {
     btn.addEventListener('click', () => selectPart(Number(btn.dataset.i)));
   });
-  logChat('sys', `パーツを ${parts.length} 個認識しました(編集タブの一覧から選べます)。`);
+  if (announce) logChat('sys', t('edit.partsFound', { n: parts.length }));
 }
 
 /** パーツを選択し、ビューポート上で強調表示する */
@@ -724,10 +924,10 @@ function selectPart(i) {
 async function scaleSelectedPart(sx, sy, sz) {
   if (selectedPart < 0 || !parts[selectedPart]) return;
   if (![sx, sy, sz].every((v) => Number.isFinite(v) && v > 0)) {
-    showError(new Error('倍率は 0 より大きい数値で指定してください。'), '入力エラー');
+    showError(new Error(t('err.scalePositive')), t('err.inputTitle'));
     return;
   }
-  await withBusy('パーツを変形しています…', () => {
+  await withBusy(t('busy.partScale'), () => {
     const target = parts[selectedPart];
     const g = target.geometry.clone();
     // パーツ自身の中心を原点に持っていってから拡大し、元の位置へ戻す
@@ -739,7 +939,7 @@ async function scaleSelectedPart(sx, sy, sz) {
 
     const merged = mergeGeometries(
       parts.map((p, i) => (i === selectedPart ? g : p.geometry)), false);
-    if (!merged) throw new Error('パーツの再結合に失敗しました。');
+    if (!merged) throw new Error(t('err.partMergeFail'));
     g.dispose();
     commitGeometry(merged);
   });
@@ -749,13 +949,13 @@ async function scaleSelectedPart(sx, sy, sz) {
 async function deleteSelectedPart() {
   if (selectedPart < 0 || !parts[selectedPart]) return;
   if (parts.length <= 1) {
-    showError(new Error('最後の1パーツは削除できません。「クリア」を使ってください。'), '削除できません');
+    showError(new Error(t('err.partLast')), t('err.partLastTitle'));
     return;
   }
-  await withBusy('パーツを削除しています…', () => {
+  await withBusy(t('busy.partDelete'), () => {
     const rest = parts.filter((_, i) => i !== selectedPart).map((p) => p.geometry);
     const merged = mergeGeometries(rest, false);
-    if (!merged) throw new Error('パーツの再結合に失敗しました。');
+    if (!merged) throw new Error(t('err.partMergeFail'));
     commitGeometry(merged);
   });
 }
@@ -766,15 +966,19 @@ let eraserOn = false;
 const eraserRay = new THREE.Raycaster();
 const eraserPointer = new THREE.Vector2();
 
-/** 消しゴムモードの ON/OFF を切り替える */
-function setEraser(on) {
+/**
+ * 消しゴムモードの ON/OFF を切り替える
+ * @param {boolean} on ON にするか
+ * @param {boolean} announce チャット欄に使い方を通知するか(言語切替時の再描画では false)
+ */
+function setEraser(on, announce = true) {
   eraserOn = on;
   const btn = document.getElementById('btn-eraser');
-  btn.textContent = `消しゴム: ${on ? 'ON' : 'OFF'}`;
+  btn.textContent = t(on ? 'edit.eraserOn' : 'edit.eraserOff');
   btn.classList.toggle('btn-primary', on);
   btn.classList.toggle('btn-ghost', !on);
   document.getElementById('viewport').classList.toggle('erasing', on);
-  if (on) logChat('sys', 'モデルをクリックすると、その位置を球状に削ります。');
+  if (on && announce) logChat('sys', t('edit.eraserGuide'));
 }
 
 /** クリック位置のモデル表面を球で削る */
@@ -790,7 +994,7 @@ async function eraseAtPointer(ev) {
   const r = Math.max(0.5, Number(document.getElementById('eraser-size').value) || 5);
   const ball = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 16));
   ball.position.copy(hit.point);
-  await subtractShape(ball, `半径 ${r}mm で削っています…`);
+  await subtractShape(ball, t('busy.erase', { r }));
 }
 
 // ── 図形・テキストの追加 ──
@@ -823,7 +1027,7 @@ async function loadTextFont() {
   if (cachedFont) return cachedFont;
   cachedFont = await new Promise((resolve, reject) => {
     new FontLoader().load(TEXT_FONT_URL, resolve, undefined,
-      () => reject(new Error('フォントの読み込みに失敗しました(ネットワークを確認してください)。')));
+      () => reject(new Error(t('err.fontLoad'))));
   });
   return cachedFont;
 }
@@ -832,14 +1036,13 @@ async function loadTextFont() {
 async function buildTextMesh() {
   const value = document.getElementById('text-value').value.trim();
   if (!value) {
-    showError(new Error('追加する文字を入力してください。'), '入力エラー');
+    showError(new Error(t('err.textEmpty')), t('err.inputTitle'));
     return null;
   }
   // helvetiker は日本語グリフを持たないため、非対応文字は明示的に弾く
   if (!/^[\x20-\x7E]+$/.test(value)) {
     showError(
-      new Error('半角英数字・記号のみ対応しています(日本語フォントは未対応)。'),
-      'この文字は使えません');
+      new Error(t('err.textChars')), t('err.textCharsTitle'));
     return null;
   }
   const font = await loadTextFont();
@@ -861,13 +1064,13 @@ function updateBadges() {
 
   if (targetMesh) {
     const s = meshSize(targetMesh);
-    modeBadge.textContent = 'モード: モデル編集';
-    meshBadge.textContent =
-      `メッシュ: ${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)} mm`;
+    modeBadge.textContent = t('badge.modeEdit');
+    meshBadge.textContent = t('badge.mesh',
+      { x: s.x.toFixed(1), y: s.y.toFixed(1), z: s.z.toFixed(1) });
     viewport.classList.add('has-mesh');
   } else {
-    modeBadge.textContent = 'モード: ゼロベース生成';
-    meshBadge.textContent = 'メッシュ: なし';
+    modeBadge.textContent = t('badge.modeZero');
+    meshBadge.textContent = t('badge.meshNone');
     viewport.classList.remove('has-mesh');
   }
   document.getElementById('btn-download').disabled = !targetMesh;
@@ -905,7 +1108,7 @@ function loadModelFile(file) {
   const isStl = name.endsWith('.stl');
   const is3mf = name.endsWith('.3mf');
   if (!isStl && !is3mf) {
-    showError(new Error('対応形式は STL / 3MF のみです: ' + file.name), '未対応のファイル形式');
+    showError(new Error(t('err.unsupported', { name: file.name })), t('err.unsupportedTitle'));
     return;
   }
 
@@ -925,12 +1128,12 @@ function loadModelFile(file) {
       clearParts();
       resetHistory();
       updateEditReadout();
-      logChat('sys', `${isStl ? 'STL' : '3MF'} を読み込みました: ${file.name}`);
+      logChat('sys', t('msg.loaded', { fmt: isStl ? 'STL' : '3MF', name: file.name }));
     } catch (err) {
-      showError(err, 'モデルの読み込みに失敗しました');
+      showError(err, t('err.loadFailTitle'));
     }
   };
-  reader.onerror = () => showError(reader.error, 'ファイル読み込みエラー');
+  reader.onerror = () => showError(reader.error, t('err.readFileTitle'));
   reader.readAsArrayBuffer(file);
 }
 
@@ -957,7 +1160,7 @@ function parse3mfGeometry(buffer) {
   });
 
   if (geometries.length === 0) {
-    throw new Error('3MF 内にメッシュが見つかりませんでした。');
+    throw new Error(t('err.no3mfMesh'));
   }
   const merged = geometries.length === 1 ? geometries[0] : mergeGeometries(geometries, false);
   merged.computeVertexNormals();
@@ -1159,7 +1362,7 @@ async function downloadStl() {
 
   // 水密化はメインスレッドを占有する。実測 12 万三角形で約 4 秒。
   let rep = null;
-  await withBusy('STL を水密化しています(面の欠けを解消)…', () => {
+  await withBusy(t('busy.watertight'), () => {
     rep = makeWatertight(baked);
   }, triangleCount(targetMesh) >= TRI_WARN);
   baked.dispose();
@@ -1184,16 +1387,15 @@ async function downloadStl() {
   const heavy = tris >= TRI_WARN;
   const fixed = rep.inTris !== rep.outTris;
   showToast(
-    `💾 保存しました(${tris.toLocaleString()} 三角形)。` +
+    t('toast.saved', { tris: tris.toLocaleString() }) +
     (fixed
-      ? `<br>🩹 面の欠けを修復しました(${rep.inTris.toLocaleString()} → ${tris.toLocaleString()} 三角形` +
-        (rep.boundary === 0 ? '、<b>水密</b>' : `、未解消 ${rep.boundary} 箇所`) + ')。形は変わりません。'
+      ? t('toast.repaired', {
+        in: rep.inTris.toLocaleString(),
+        out: tris.toLocaleString(),
+        state: rep.boundary === 0 ? t('toast.watertight') : t('toast.remain', { n: rep.boundary }),
+      })
       : '') +
-    (heavy
-      ? '<br><b>スライサーで「三角形が多い」と警告が出る可能性があります。</b>' +
-        '出ても<b>簡略化(Simplify)は使わず</b>、詳しくは右上「i」の' +
-        '「保存した STL をスライサーで開くとき」をご確認ください。'
-      : ''),
+    (heavy ? t('toast.heavy') : ''),
     { warn: heavy });
 }
 
@@ -1279,7 +1481,7 @@ function recordRunTime(tris, ms) {
 
 /** 所要時間を人間向けに整形する */
 function formatMs(ms) {
-  return ms < 1000 ? `${Math.round(ms)} ミリ秒` : `${(ms / 1000).toFixed(1)} 秒`;
+  return ms < 1000 ? t('time.ms', { n: Math.round(ms) }) : t('time.s', { n: (ms / 1000).toFixed(1) });
 }
 
 /**
@@ -1293,11 +1495,7 @@ function setExecOverlay(visible, note, heavy) {
   document.getElementById('exec-note').textContent = note || '';
   const warn = document.getElementById('exec-warn');
   if (warn) {
-    warn.innerHTML = heavy
-      ? '計算中はブラウザの操作を受け付けず、<b>中止もできません</b>。<br>' +
-        'ブラウザが「応答しません」と表示したら<br><b>「待機」を選べば処理は続きます</b>。<br>' +
-        '規模によっては数分かかり、失敗することもあります。'
-      : '計算中はブラウザの操作を受け付けません。<br>そのままお待ちください。';
+    warn.innerHTML = t(heavy ? 'exec.warnHeavy' : 'exec.warn');
     warn.classList.toggle('exec-warn-strong', !!heavy);
   }
   ov.classList.toggle('hidden', !visible);
@@ -1349,23 +1547,21 @@ async function preflight(tris, opLabel) {
   const heavy = tris >= TRI_WARN;
 
   const noteParts = [];
-  if (tris > 0) noteParts.push(`対象 ${tris.toLocaleString()} 三角形`);
-  if (est !== null) noteParts.push(`推定 約${formatMs(est)}(過去の実測より)`);
+  if (tris > 0) noteParts.push(t('pre.noteTris', { n: tris.toLocaleString() }));
+  if (est !== null) noteParts.push(t('pre.noteEst', { t: formatMs(est) }));
   const note = noteParts.join(' / ');
 
   // 危険域でなければ、そのまま進む(注意はオーバーレイ側で出す)
   if (tris < TRI_CONFIRM) return { ok: true, est, heavy, note };
 
   const lines = [
-    `対象は <b>${tris.toLocaleString()} 三角形</b>あります。`,
-    est !== null
-      ? `過去の実測から <b>約${formatMs(est)}</b> かかる見込みです。`
-      : '近い規模の実測データが無いため、所要時間は予測できません。',
-    '<b>数分かかることがあり、ブラウザがタブを強制終了して作業が失われる場合があります。</b>',
-    '計算中は中止できません。「応答しません」と出たら<b>「待機」</b>を選んでください。',
-    '先に「STL 保存」でバックアップしておくことを強くおすすめします。',
+    t('pre.lineTris', { n: tris.toLocaleString() }),
+    est !== null ? t('pre.lineEst', { t: formatMs(est) }) : t('pre.lineNoEst'),
+    t('pre.lineRisk'),
+    t('pre.lineWait'),
+    t('pre.lineBackup'),
   ];
-  const ok = await askConfirm(`⚠ ${opLabel}: 時間がかかります`, lines.join('<br>'));
+  const ok = await askConfirm(t('pre.title', { op: opLabel }), lines.join('<br>'));
   return { ok, est, heavy, note };
 }
 
@@ -1386,13 +1582,13 @@ function nextPaint() {
 async function runUserCode(code) {
   clearError();
   if (!code) {
-    showError(new Error('実行するコードがありません'), 'コードが空です');
+    showError(new Error(t('err.emptyCode')), t('err.emptyCodeTitle'));
     return false;
   }
 
   // 実行前ガード。規模が大きければ、始める前に確認を取る
   const inTris = triangleCount(targetMesh);
-  const pre = await preflight(inTris, 'コード実行');
+  const pre = await preflight(inTris, t('op.runCode'));
   if (!pre.ok) return false;
   const est = pre.est;
 
@@ -1438,15 +1634,12 @@ async function runUserCode(code) {
     }
     // メッシュが返らなかった: scene 直接操作とみなし、警告のみ
     showDebugReport({ ok: false, elapsed, inTris, outTris: 0, logs, est });
-    showError(
-      new Error('setResult(mesh) が呼ばれず、メッシュも return されませんでした。\n' +
-        '完成メッシュを setResult(...) で登録してください。'),
-      'メッシュを取得できませんでした');
+    showError(new Error(t('err.noResult')), t('err.noResultTitle'));
     return false;
   } catch (err) {
     elapsed = performance.now() - t0;
     showDebugReport({ ok: false, elapsed, inTris, outTris: 0, logs, est });
-    showError(err, '実行時エラー');
+    showError(err, t('err.runtimeTitle'));
     return false;
   } finally {
     console.log = orig.log; console.warn = orig.warn; console.error = orig.error;
@@ -1464,12 +1657,12 @@ function showDebugReport({ ok, elapsed, inTris, outTris, logs, est }) {
   let estText = '—';
   if (est !== null) {
     const off = Math.max(est, elapsed) / Math.max(1, Math.min(est, elapsed));
-    estText = `約${formatMs(est)}` + (off >= 2 ? '(実測と乖離)' : '');
+    estText = t('dbg.estApprox', { t: formatMs(est) }) + (off >= 2 ? t('dbg.estOff') : '');
   }
 
   // CSG は結果の三角形数を増やす。増分を明示しないと
   // 「1回目は成功したのに2回目で固まる」理由がユーザーに分からない
-  let outText = outTris > 0 ? `${outTris.toLocaleString()} 三角形` : '—';
+  let outText = outTris > 0 ? t('unit.tris', { n: outTris.toLocaleString() }) : '—';
   if (outTris > 0 && inTris > 0 && outTris !== inTris) {
     const d = outTris - inTris;
     const pct = Math.round((d / inTris) * 100);
@@ -1478,19 +1671,19 @@ function showDebugReport({ ok, elapsed, inTris, outTris, logs, est }) {
       : ` (${d.toLocaleString()} / ${pct}%)`;
   }
 
+  const elapsedLabel = t('dbg.elapsed');
   const rows = [
-    ['結果', ok ? '✅ 反映しました' : '⚠ 反映できませんでした'],
-    ['所要時間', formatMs(elapsed)],
-    ['事前推定', estText],
-    ['入力メッシュ', inTris > 0 ? `${inTris.toLocaleString()} 三角形` : 'なし(ゼロベース)'],
-    ['出力メッシュ', outText],
+    [t('dbg.result'), t(ok ? 'dbg.ok' : 'dbg.ng')],
+    [elapsedLabel, formatMs(elapsed)],
+    [t('dbg.est'), estText],
+    [t('dbg.in'), inTris > 0 ? t('unit.tris', { n: inTris.toLocaleString() }) : t('dbg.zeroBase')],
+    [t('dbg.out'), outText],
   ];
   if (outTris >= TRI_WARN) {
-    rows.push(['⚠ 次の実行', `この ${outTris.toLocaleString()} 三角形が次回の入力になります。` +
-      `続けて加工すると、さらに時間がかかります。区切りで「STL 保存」をおすすめします。`]);
+    rows.push([t('dbg.nextTitle'), t('dbg.next', { n: outTris.toLocaleString() })]);
   }
   stats.innerHTML = rows.map(([k, v]) =>
-    `<dt>${k}</dt><dd${k === '所要時間' && elapsed >= 5000 ? ' class="dbg-slow"' : ''}>${v}</dd>`
+    `<dt>${k}</dt><dd${k === elapsedLabel && elapsed >= 5000 ? ' class="dbg-slow"' : ''}>${v}</dd>`
   ).join('');
 
   if (logs.length) {
@@ -1510,7 +1703,7 @@ function showError(err, title) {
   const box = document.getElementById('error-box');
   const trace = document.getElementById('error-trace');
   const head = box.querySelector('.error-head span');
-  head.textContent = '⚠ ' + (title || '実行エラー');
+  head.textContent = '⚠ ' + (title || t('err.default'));
   const msg = err && err.stack ? err.stack : String(err);
   trace.textContent = msg;
   box.classList.remove('hidden');
@@ -1530,32 +1723,49 @@ function clearError() {
  * targetMesh の有無で「ゼロから生成」/「CSG で加工して置換」を切り替える。
  */
 function buildContext() {
+  const en = getLang() === 'en';
   if (targetMesh) {
     const s = meshSize(targetMesh);
     const tris = triangleCount(targetMesh);
+    const dims = `${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)}`;
     // 三角形数を伝えると、LLM が分割数や CSG 回数を規模に合わせて調整できる
     const load = tris >= TRI_CONFIRM
-      ? `\n**このモデルは既に非常に重い状態です。三角形数をこれ以上増やさないことを最優先し、` +
-        `分割数は最小限(円筒 12〜16)、CSG は 1 回だけにしてください。**`
+      ? (en
+        ? `\n**This model is already extremely heavy. Your top priority is to add no more triangles: ` +
+          `use minimal segment counts (12-16 for cylinders) and at most one CSG call.**`
+        : `\n**このモデルは既に非常に重い状態です。三角形数をこれ以上増やさないことを最優先し、` +
+          `分割数は最小限(円筒 12〜16)、CSG は 1 回だけにしてください。**`)
       : tris >= TRI_WARN
-        ? `\n**このモデルは既に重い部類です。分割数を抑え、CSG の回数を最小にしてください。**`
+        ? (en
+          ? `\n**This model is already on the heavy side. Keep segment counts low and minimise CSG calls.**`
+          : `\n**このモデルは既に重い部類です。分割数を抑え、CSG の回数を最小にしてください。**`)
         : '';
-    return `# 現在の状態\n` +
-      `targetMesh が存在します(バウンディングボックス: ` +
-      `${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)} mm、原点中心)。\n` +
-      `現在の三角形数: ${tris.toLocaleString()}。${load}\n` +
-      `この targetMesh を CSG で加工し、加工後のメッシュを setResult() で登録してください。\n` +
-      `元の targetMesh は自動で置換されます。`;
+    return en
+      ? `# Current state\n` +
+        `targetMesh exists (bounding box: ${dims} mm, centred on the origin).\n` +
+        `Current triangle count: ${tris.toLocaleString()}.${load}\n` +
+        `Process this targetMesh with CSG and register the result with setResult().\n` +
+        `The original targetMesh is replaced automatically.`
+      : `# 現在の状態\n` +
+        `targetMesh が存在します(バウンディングボックス: ${dims} mm、原点中心)。\n` +
+        `現在の三角形数: ${tris.toLocaleString()}。${load}\n` +
+        `この targetMesh を CSG で加工し、加工後のメッシュを setResult() で登録してください。\n` +
+        `元の targetMesh は自動で置換されます。`;
   }
-  return `# 現在の状態\n` +
-    `targetMesh は存在しません(空のシーン)。\n` +
-    `THREE の基本図形(Box/Cylinder/Sphere 等)と CSG を用いて、\n` +
-    `指示された形状をゼロから生成し、setResult() で登録してください。`;
+  return en
+    ? `# Current state\n` +
+      `There is no targetMesh (the scene is empty).\n` +
+      `Build the requested shape from scratch with THREE primitives (Box/Cylinder/Sphere etc.) and CSG,\n` +
+      `then register it with setResult().`
+    : `# 現在の状態\n` +
+      `targetMesh は存在しません(空のシーン)。\n` +
+      `THREE の基本図形(Box/Cylinder/Sphere 等)と CSG を用いて、\n` +
+      `指示された形状をゼロから生成し、setResult() で登録してください。`;
 }
 
 /** システムプロンプト(テンプレの {{CONTEXT}} を現在状態で差し替え) */
 function buildSystemPrompt() {
-  const tmpl = settings.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  const tmpl = settings.systemPrompt || defaultSystemPrompt();
   return tmpl.replace('{{CONTEXT}}', buildContext());
 }
 
@@ -1563,7 +1773,7 @@ function buildSystemPrompt() {
 async function callGemini(userText) {
   const key = settings.apiKey;
   const model = settings.model || 'gemini-2.5-flash';
-  if (!key) throw new Error('設定タブで Gemini API キーを入力してください。');
+  if (!key) throw new Error(t('err.apiKeyMissing'));
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/` +
     `${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
@@ -1582,12 +1792,12 @@ async function callGemini(userText) {
 
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    throw new Error(`Gemini API エラー ${res.status}\n${detail}`);
+    throw new Error(t('err.geminiApi', { status: res.status, detail }));
   }
   const data = await res.json();
   const parts = data?.candidates?.[0]?.content?.parts || [];
   const text = parts.map((p) => p.text || '').join('').trim();
-  if (!text) throw new Error('Gemini から空の応答が返りました。');
+  if (!text) throw new Error(t('err.geminiEmpty'));
   return text;
 }
 
@@ -1596,7 +1806,7 @@ async function handleChatSend(userText) {
   logChat('user', userText);
   const sendBtn = document.getElementById('btn-send');
   sendBtn.disabled = true;
-  const thinking = logChat('ai', '生成中…');
+  const thinking = logChat('ai', t('chat.thinking'));
 
   try {
     const reply = await callGemini(userText);
@@ -1606,8 +1816,8 @@ async function handleChatSend(userText) {
     await runUserCode(code);
   } catch (err) {
     thinking.remove();
-    showError(err, 'Gemini 連携エラー');
-    logChat('sys', 'エラーが発生しました。詳細は下部のエラー欄を参照してください。');
+    showError(err, t('err.geminiTitle'));
+    logChat('sys', t('msg.errSeeBelow'));
   } finally {
     sendBtn.disabled = false;
   }
@@ -1657,22 +1867,22 @@ function logCopyPrompt(prompt) {
   el.className = 'msg msg-ai';
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   el.innerHTML =
-    '<details open><summary>📋 送信用プロンプト(クリックで折りたたみ)</summary>' +
+    `<details open><summary>${t('copy.summary')}</summary>` +
     `<pre>${esc(prompt)}</pre></details>` +
-    '<div class="msg-tools"><button class="btn-copy" type="button">📋 コピー</button></div>';
+    `<div class="msg-tools"><button class="btn-copy" type="button">${t('copy.btn')}</button></div>`;
 
   // ワンクリックコピー。成否をボタン自身のラベルで即座にフィードバックする
   const btn = el.querySelector('.btn-copy');
   btn.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(prompt);
-      btn.textContent = '✅ コピーしました';
+      btn.textContent = t('copy.ok');
       btn.classList.add('copied');
     } catch (_) {
-      btn.textContent = '⚠ コピー失敗(手動で選択してください)';
+      btn.textContent = t('copy.fail');
     }
     setTimeout(() => {
-      btn.textContent = '📋 コピー';
+      btn.textContent = t('copy.btn');
       btn.classList.remove('copied');
     }, 2000);
   });
@@ -1682,28 +1892,22 @@ function logCopyPrompt(prompt) {
   return el;
 }
 
-/** コピペモード/API モードの切替。初回切替時のみガイドメッセージをチャットログに流す */
-function setChatMode(mode) {
+/**
+ * コピペモード/API モードの切替。初回切替時のみガイドメッセージをチャットログに流す。
+ * @param {'copy'|'api'} mode 切り替え先
+ * @param {boolean} announce ガイドをチャットに流すか(言語切替時の再描画では false)
+ */
+function setChatMode(mode, announce = true) {
   chatMode = mode;
   document.querySelectorAll('.mode-btn').forEach((btn) =>
     btn.classList.toggle('mode-btn-active', btn.dataset.mode === mode));
   document.getElementById('paste-back').classList.toggle('hidden', mode !== 'copy');
   document.getElementById('btn-send').textContent =
-    mode === 'copy' ? 'プロンプトをコピー' : '送信';
+    t(mode === 'copy' ? 'chat.sendCopy' : 'chat.sendApi');
 
-  if (modeGuideShown[mode]) return;
+  if (!announce || modeGuideShown[mode]) return;
   modeGuideShown[mode] = true;
-  if (mode === 'copy') {
-    logChat('sys',
-      '📋 コピペモード: ChatGPT / Claude など、お好きな LLM と手動でやりとりできます(Gemini 限定ではありません)。\n' +
-      '① 下の入力欄に指示を書いて「プロンプトをコピー」を押す(クリップボードにコピーされます)。\n' +
-      '② コピーした内容を外部チャットに貼り付けて送信する。\n' +
-      '③ 返ってきた回答(コードを含む全文)を下の「外部チャットの回答を貼り付け」欄に貼り付け、' +
-      '「貼り付けを実行」を押すとこのシーンに反映されます。');
-  } else {
-    logChat('sys',
-      '🔌 API モード: 設定タブに登録した Gemini API キーを使い、指示の送信からコード実行まで自動で行います。');
-  }
+  logChat('sys', t(mode === 'copy' ? 'guide.copy' : 'guide.api'));
 }
 
 /** 編集タブの配線。数値入力 → ジオメトリ操作 → 履歴 という流れに統一する */
@@ -1736,20 +1940,20 @@ function initEditUI() {
 
   // 図形の追加 / 削り
   document.getElementById('btn-prim-add').addEventListener('click', () => {
-    unionShape(buildPrimitive(), '図形を結合しています…');
+    unionShape(buildPrimitive(), t('busy.primUnion'));
   });
   document.getElementById('btn-prim-sub').addEventListener('click', () => {
-    subtractShape(buildPrimitive(), '図形で削っています…');
+    subtractShape(buildPrimitive(), t('busy.primSub'));
   });
 
   // テキストの追加 / 彫り込み
   document.getElementById('btn-text-add').addEventListener('click', async () => {
     const m = await buildTextMesh();
-    if (m) unionShape(m, '文字を結合しています…');
+    if (m) unionShape(m, t('busy.textUnion'));
   });
   document.getElementById('btn-text-sub').addEventListener('click', async () => {
     const m = await buildTextMesh();
-    if (m) subtractShape(m, '文字を彫っています…');
+    if (m) subtractShape(m, t('busy.textSub'));
   });
 
   // undo / redo(ボタンとショートカット)
@@ -1788,22 +1992,24 @@ function initHintLibrary() {
   const body = document.getElementById('hint-lib-body');
   const chatInput = document.getElementById('chat-input');
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // 引用符は言語に合わせる(日本語の鉤括弧を英語表示に混ぜない)
+  const [q0, q1] = getLang() === 'en' ? ['“', '”'] : ['「', '」'];
 
-  const groups = INSTRUCTION_TEMPLATES.map((g) =>
+  const groups = instructionTemplates().map((g) =>
     `<div class="hint-group"><div class="hint-group-title">${esc(g.title)}</div>` +
     '<div class="hint-chips">' +
-    g.items.map((t) =>
-      `<button class="hint-chip" type="button" data-tpl="${esc(t)}">${esc(t)}</button>`).join('') +
+    // ここで t を仮引数名に使うと i18n の t() を隠してしまうため tpl とする
+    g.items.map((tpl) =>
+      `<button class="hint-chip" type="button" data-tpl="${esc(tpl)}">${esc(tpl)}</button>`).join('') +
     '</div></div>').join('');
 
   const limits =
-    '<div class="hint-group"><div class="hint-group-title">できないこと(LLM は形を見ていません)</div>' +
+    `<div class="hint-group"><div class="hint-group-title">${t('hint.limitsTitle')}</div>` +
     '<ul class="hint-no">' +
-    INSTRUCTION_LIMITS.map((l) =>
-      `<li>✕ <b>「${esc(l.what)}」</b> — ${esc(l.why)}</li>`).join('') +
+    instructionLimits().map((l) =>
+      `<li>✕ <b>${q0}${esc(l.what)}${q1}</b> — ${esc(l.why)}</li>`).join('') +
     '</ul>' +
-    '<p class="hint-note">形を指し示す指示は通りません。かわりに<b>寸法と座標(mm)</b>で伝えてください。' +
-    '3D ビューを見て判断するのはあなたの役割です。</p></div>';
+    `<p class="hint-note">${t('hint.note')}</p></div>`;
 
   body.innerHTML = groups + limits;
 
@@ -1822,13 +2028,15 @@ function initHintLibrary() {
 /** コピペモードの送信フロー: プロンプトを組み立ててクリップボードにコピーし、ログに残す */
 async function handleChatCopy(userText) {
   logChat('user', userText);
-  const prompt = buildSystemPrompt() + '\n\n# 指示\n' + userText;
+  // 指示の見出しもシステムプロンプトと同じ言語に揃える(混在すると LLM が言語を取り違える)
+  const heading = getLang() === 'en' ? '\n\n# Instruction\n' : '\n\n# 指示\n';
+  const prompt = buildSystemPrompt() + heading + userText;
 
   try {
     await navigator.clipboard.writeText(prompt);
-    logChat('sys', '✅ プロンプトをクリップボードにコピーしました。外部チャットに貼り付けて送信してください。');
+    logChat('sys', t('msg.copied'));
   } catch (_) {
-    logChat('sys', '⚠ クリップボードへのコピーに失敗しました。下に表示したプロンプトを手動で選択してコピーしてください。');
+    logChat('sys', t('msg.copyFail'));
   }
   logCopyPrompt(prompt);
 }
@@ -1856,7 +2064,7 @@ async function handlePasteRun() {
 function loadSettings() {
   const defaults = {
     apiKey: '', model: 'gemini-2.5-flash',
-    systemPrompt: DEFAULT_SYSTEM_PROMPT, execHistory: [],
+    systemPrompt: defaultSystemPrompt(), execHistory: [],
     promptVersion: PROMPT_VERSION, promptEdited: false,
   };
   let s = defaults;
@@ -1868,7 +2076,7 @@ function loadSettings() {
   // 保存済みプロンプトをユーザーが編集していなければ、既定の更新に追従させる。
   // これが無いと、一度でも設定を保存した環境に新しい既定プロンプトが届かない。
   if (!s.promptEdited && s.promptVersion !== PROMPT_VERSION) {
-    s.systemPrompt = DEFAULT_SYSTEM_PROMPT;
+    s.systemPrompt = defaultSystemPrompt();
     s.promptVersion = PROMPT_VERSION;
   }
   return s;
@@ -1889,8 +2097,8 @@ function initUI() {
   document.querySelectorAll('.tab').forEach((tab) => {
     tab.addEventListener('click', () => {
       const name = tab.dataset.tab;
-      document.querySelectorAll('.tab').forEach((t) =>
-        t.classList.toggle('tab-active', t === tab));
+      document.querySelectorAll('.tab').forEach((el) =>
+        el.classList.toggle('tab-active', el === tab));
       document.querySelectorAll('.tab-panel').forEach((p) =>
         p.classList.toggle('tab-panel-active', p.dataset.panel === name));
     });
@@ -1929,7 +2137,7 @@ function initUI() {
   // コード直接入力(= LLM 側の JavaScript 回答を貼り付けて実行する)
   const codeInput = document.getElementById('code-input');
   const runBtn = document.getElementById('btn-run');
-  codeInput.value = SAMPLE_CODE;
+  codeInput.value = sampleCode();
   runBtn.addEventListener('click', async () => {
     runBtn.disabled = true;
     try {
@@ -1939,7 +2147,7 @@ function initUI() {
     }
   });
   document.getElementById('btn-sample').addEventListener('click', () => {
-    codeInput.value = SAMPLE_CODE;
+    codeInput.value = sampleCode();
   });
   document.getElementById('btn-code-clear').addEventListener('click', () => {
     codeInput.value = '';
@@ -1964,7 +2172,7 @@ function initUI() {
     setEraser(false);
     resetHistory();
     updateEditReadout();
-    logChat('sys', 'シーンをクリアしました(ゼロベース生成モード)。');
+    logChat('sys', t('msg.cleared'));
   });
 
   // エラーを閉じる
@@ -1995,24 +2203,55 @@ function initUI() {
   const sysPrompt = document.getElementById('sys-prompt');
   apiKey.value = settings.apiKey || '';
   apiModel.value = settings.model || 'gemini-2.5-flash';
-  sysPrompt.value = settings.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  sysPrompt.value = settings.systemPrompt || defaultSystemPrompt();
 
   apiKey.addEventListener('change', () => { settings.apiKey = apiKey.value.trim(); saveSettings(); });
   apiModel.addEventListener('change', () => { settings.model = apiModel.value; saveSettings(); });
   sysPrompt.addEventListener('change', () => {
     settings.systemPrompt = sysPrompt.value;
     // 手で編集した以降は、既定プロンプトの更新で上書きしない
-    settings.promptEdited = sysPrompt.value !== DEFAULT_SYSTEM_PROMPT;
+    settings.promptEdited = !isDefaultPrompt(sysPrompt.value);
     settings.promptVersion = PROMPT_VERSION;
     saveSettings();
   });
   document.getElementById('btn-reset-prompt').addEventListener('click', () => {
-    settings.systemPrompt = DEFAULT_SYSTEM_PROMPT;
+    settings.systemPrompt = defaultSystemPrompt();
     settings.promptEdited = false;
     settings.promptVersion = PROMPT_VERSION;
-    sysPrompt.value = DEFAULT_SYSTEM_PROMPT;
+    sysPrompt.value = settings.systemPrompt;
     saveSettings();
   });
+
+  // 言語切替。ページを再読み込みすると作りかけのメッシュが消えるため、
+  // その場で DOM と動的生成部分だけを描き直す。
+  document.getElementById('btn-lang').addEventListener('click', () => {
+    setLang(getLang() === 'ja' ? 'en' : 'ja');
+  });
+  onLangChange(() => relocalize(sysPrompt, document.getElementById('code-input')));
+}
+
+/**
+ * 言語切替後に、JS が組み立てた表示を作り直す。
+ * data-i18n 属性が付いた静的要素は i18n.js 側で更新済みなので、ここでは扱わない。
+ * @param {HTMLTextAreaElement} sysPrompt 設定タブのシステムプロンプト欄
+ * @param {HTMLTextAreaElement} codeInput コードタブの入力欄
+ */
+function relocalize(sysPrompt, codeInput) {
+  updateBadges();
+  updateEditReadout();
+  setEraser(eraserOn, false);
+  setChatMode(chatMode, false);
+  initHintLibrary();
+  if (parts.length) renderPartsList(false);
+
+  // 未編集のサンプル/既定プロンプトだけ差し替える(手を入れた内容は消さない)
+  if (isSampleCode(codeInput.value)) codeInput.value = sampleCode();
+  if (!settings.promptEdited) {
+    settings.systemPrompt = defaultSystemPrompt();
+    sysPrompt.value = settings.systemPrompt;
+    saveSettings();
+  }
+  logChat('sys', t('lang.switched'));
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -2020,13 +2259,14 @@ function initUI() {
 // ─────────────────────────────────────────────────────────────
 
 function main() {
+  applyStaticI18n();
   initThree();
   initDragAndDrop();
   initUI();
   updateBadges();
   resetHistory();
-  logChat('sys', 'ようこそ。指示だけでゼロから生成、または STL/3MF を D&D して編集できます。');
-  logChat('sys', 'チャットを使わずに直接編集したい場合は「編集」タブへ。拡大縮小・消しゴム・パーツ分割・図形/文字の追加ができます。');
+  logChat('sys', t('msg.welcome1'));
+  logChat('sys', t('msg.welcome2'));
   setChatMode('copy');
 }
 

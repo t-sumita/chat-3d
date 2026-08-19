@@ -130,8 +130,13 @@ CSG を使わない（`geometry.translate/rotate/scale` を使う）ことを指
 これは実機での不具合報告(Bambu Studio で「三角形が多すぎる」警告 → スライサー側の
 簡略化で穴あき発生)を受けて追加した。CSG は結果の三角形数を増やす(A-1)ため、
 スライサー側が単純な間引きで簡略化すると水密性が壊れることがある。トーストと
-info パネルの「保存した STL をスライサーで開くとき」節で、簡略化ではなく
-修復(Repair)機能を先に試すよう案内する。詳細は `docs/known-issues.md` の A-5。
+info パネルの「「三角形が多すぎる」と言われたら」節で、**簡略化を使わず、
+そのままスライスできるなら何もしない**よう案内する。詳細は `docs/known-issues.md` の A-5。
+
+v0.9.1 で `makeWatertight()` が水密化まで面倒を見るようになったため、この文面から
+「スライサーの修復機能を先に試す」という案内は外した(保存した STL は既に水密で、
+Bambu Studio がエラーを出さないことを実測で確認済み)。修復に関する注意は
+info パネルの「それでも修復を促されたら」節へ降格してある。
 
 ### 水密化(`makeWatertight`) — STL 保存時の T ジャンクション修復
 
@@ -276,6 +281,44 @@ A の行列を入れて返す。行列を捨てると `targetMesh` が変換を�
 - `systemInstruction` に system プロンプト、`contents` にユーザー指示を入れる。
 - 応答 `candidates[0].content.parts[].text` を結合し、コード抽出 → 実行。
 - API キー・モデル・system プロンプトは localStorage（`chat3d.settings.v1`）に保存。
+
+## 多言語化(`i18n.js`、v0.10.0)
+
+### 文言の置き場所を 2 つに分けている
+| 置き場所 | 対象 | 理由 |
+| --- | --- | --- |
+| `i18n.js` の `JA` / `EN` 辞書 | **画面表示の文言**(ボタン・ラベル・トースト・エラー・info パネル) | 対訳が 1 対 1 で並ぶので抜けに気づける |
+| `main.js` の `*_JA` / `*_EN` 定数 | **LLM に渡すもの**(`DEFAULT_SYSTEM_PROMPT` / `INSTRUCTION_TEMPLATES` / `INSTRUCTION_LIMITS` / `SAMPLE_CODE`) | 三角形数を抑えるルールの調整はプロンプトの本文と一緒に読めた方が速い(CLAUDE.md のルール) |
+
+`main.js` からは直に定数を参照せず、`defaultSystemPrompt()` / `sampleCode()` /
+`instructionTemplates()` / `instructionLimits()` 経由で現在言語のものを取る。
+「未編集かどうか」の判定は `isDefaultPrompt()` / `isSampleCode()` が**両言語と突き合わせる**
+(ja の既定文のまま en に切り替えたとき「編集済み」と誤判定しないため)。
+
+### DOM への反映
+- `index.html` の静的な文言は `data-i18n`(textContent)/ `data-i18n-html`(innerHTML)/
+  `data-i18n-title`(title)/ `data-i18n-ph`(placeholder)属性で指定し、
+  `applyStaticI18n()` が一括で書き換える。`<html lang>` / `<title>` / meta description も更新する。
+- JS が組み立てる文言は `t(key, params)`。`{name}` 形式のプレースホルダを置換する。
+  キーが両辞書に無ければ**キー名をそのまま返す**(空文字にすると欠落に気づけない)。
+
+### 切り替えは「再読み込みしない」
+`setLang()` は localStorage に保存 → `applyStaticI18n()` → `onLangChange()` の購読者を呼ぶ。
+**ページはリロードしない。**リロードすると作業中のメッシュと undo 履歴が消えるため。
+購読側の `relocalize()` が、JS が組み立てた部分だけを作り直す:
+`updateBadges()` / `updateEditReadout()` / `setEraser(eraserOn, false)` /
+`setChatMode(chatMode, false)` / `initHintLibrary()` / `renderPartsList(false)`。
+第 2 引数の `announce` はチャットログへの通知を抑えるためのもので、
+**これが無いと言語を切り替えるたびに同じガイドがログへ積み上がる。**
+
+### 注意点
+- `i18n.js` は `index.html` が `main.js` に付けた `?v=` を引き継いで**動的 import** する。
+  静的 `import` だと `?v=` が付かず、バージョンを上げても古い辞書がキャッシュから使われる。
+- 文言を追加するときは **ja と en の両方に必ず入れる**。片方だけだと `t()` が JA へ
+  フォールバックし、英語 UI に日本語が混ざる。
+- `textContent` に入る値に `&amp;` のような HTML 実体参照を書かない(そのまま表示される)。
+  実体参照が要るのは `data-i18n-html` の値だけ。
+- コールバックの仮引数に `t` を使わない(i18n の `t()` を隠す)。
 
 ## Subutomo 共有 UI
 - 左下バッジ: `assets/subutomo-badge.js` + `SUBUTOMO_BADGE_CONFIG`（spctrl-site と同一挙動）。
