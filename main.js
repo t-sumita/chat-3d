@@ -986,6 +986,9 @@ function makeWatertight(geo) {
   const p = src.getAttribute('position');
 
   // --- 頂点を量子化して溶接する ---
+  // 近傍セルまで見る「許容誤差つき溶接」も試したが、細い三角形を潰してしまい
+  // 境界エッジがかえって増えた(12 万三角形で 14 本 → 432 本)。体積もわずかにずれる。
+  // 単純な量子化のほうが安全なので、こちらを採用する。
   const idOf = new Map();
   const px = [], py = [], pz = [];
   const idx = new Int32Array(p.count);
@@ -1075,31 +1078,73 @@ function makeWatertight(geo) {
     }
   }
 
+  // --- 厚みゼロの「内部の壁」を消す ---
+  // 同じ3頂点で向きだけが逆の面の組は、表と裏が背中合わせに重なった膜で、
+  // 立体としての体積に一切寄与しない。放置すると 1 本の辺を 4 面以上が共有する
+  // 非多様体エッジになるため、組ごと削除する(実測: 非多様体 17 本 → 0 本)。
+  const byTri = new Map();
+  const triCount = out.length / 3;
+  for (let i = 0; i < triCount; i++) {
+    const a = out[i * 3], b = out[i * 3 + 1], c = out[i * 3 + 2];
+    const s = a < b ? (b < c ? `${a}|${b}|${c}` : (a < c ? `${a}|${c}|${b}` : `${c}|${a}|${b}`))
+      : (a < c ? `${b}|${a}|${c}` : (b < c ? `${b}|${c}|${a}` : `${c}|${b}|${a}`));
+    let g = byTri.get(s);
+    if (!g) { g = []; byTri.set(s, g); }
+    g.push(i);
+  }
+  /** 面の頂点順を、最小頂点を先頭にした巡回で正規化する(向きの比較用) */
+  const cyc = (i) => {
+    const a = out[i * 3], b = out[i * 3 + 1], c = out[i * 3 + 2];
+    if (a <= b && a <= c) return `${a}|${b}|${c}`;
+    if (b <= a && b <= c) return `${b}|${c}|${a}`;
+    return `${c}|${a}|${b}`;
+  };
+  const killed = new Set();
+  for (const ids of byTri.values()) {
+    if (ids.length < 2) continue;
+    const ref = cyc(ids[0]);
+    const fwd = [], bwd = [];
+    for (const i of ids) (cyc(i) === ref ? fwd : bwd).push(i);
+    const pairs = Math.min(fwd.length, bwd.length);
+    for (let j = 0; j < pairs; j++) { killed.add(fwd[j]); killed.add(bwd[j]); }
+  }
+  const kept = [];
+  for (let i = 0; i < triCount; i++) {
+    if (killed.has(i)) continue;
+    kept.push(out[i * 3], out[i * 3 + 1], out[i * 3 + 2]);
+  }
+
   // --- 残った境界エッジ数(0 なら水密) ---
   const edges = new Map();
-  for (let i = 0; i < out.length; i += 3) {
-    const t = [out[i], out[i + 1], out[i + 2]];
+  for (let i = 0; i < kept.length; i += 3) {
+    const t = [kept[i], kept[i + 1], kept[i + 2]];
     for (const [u, v] of [[t[0], t[1]], [t[1], t[2]], [t[2], t[0]]]) {
       const k = u < v ? u * nv + v : v * nv + u;
       edges.set(k, (edges.get(k) || 0) + 1);
     }
   }
-  let boundary = 0;
-  for (const c of edges.values()) if (c === 1) boundary++;
+  let boundary = 0, nonManifold = 0;
+  for (const c of edges.values()) { if (c === 1) boundary++; else if (c > 2) nonManifold++; }
 
   // 面積ゼロの三角形は「辺を分割した痕」として位相をつないでいるので除去しないこと。
   // 除去すると境界エッジが復活する(実測: 0 → 91)。
-  const arr = new Float32Array(out.length * 3);
-  for (let i = 0; i < out.length; i++) {
-    arr[i * 3] = px[out[i]];
-    arr[i * 3 + 1] = py[out[i]];
-    arr[i * 3 + 2] = pz[out[i]];
+  const arr = new Float32Array(kept.length * 3);
+  for (let i = 0; i < kept.length; i++) {
+    arr[i * 3] = px[kept[i]];
+    arr[i * 3 + 1] = py[kept[i]];
+    arr[i * 3 + 2] = pz[kept[i]];
   }
   const res = new THREE.BufferGeometry();
   res.setAttribute('position', new THREE.BufferAttribute(arr, 3));
   res.computeVertexNormals();
   if (src !== geo) src.dispose();
-  return { geometry: res, inTris: faces.length / 3, outTris: out.length / 3, boundary };
+  return {
+    geometry: res,
+    inTris: faces.length / 3,
+    outTris: kept.length / 3,
+    boundary,
+    nonManifold,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────
