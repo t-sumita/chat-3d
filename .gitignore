@@ -9,6 +9,9 @@ Thumbs.db
 *.log
 node_modules/
 
+# 不具合調査用の一時ファイル(実物 STL・解析スクリプト)。公開対象ではない
+debug/
+
 # ローカル秘匿(API キーはコードに置かず localStorage 運用。念のため)
 .env
 .env.local
