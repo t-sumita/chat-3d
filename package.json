@@ -1,6 +1,6 @@
 {
   "name": "chat-3d",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "ブラウザ完結型・テキスト指示/コード実行による 3D モデル(STL)生成・編集ツール(PoC) by Subutomo Dev",
   "author": "Subutomo Dev",
   "license": "MIT",
