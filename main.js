@@ -2057,7 +2057,9 @@ async function callGemini(userText) {
 
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    throw new Error(t('err.geminiApi', { status: res.status, detail }));
+    const err = new Error(t('err.geminiApi', { status: res.status, detail }));
+    err.status = res.status; // 503(混雑)時にコピペモードを案内するために使う
+    throw err;
   }
   const data = await res.json();
   const parts = data?.candidates?.[0]?.content?.parts || [];
@@ -2083,6 +2085,8 @@ async function handleChatSend(userText) {
     thinking.remove();
     showError(err, t('err.geminiTitle'));
     logChat('sys', t('msg.errSeeBelow'));
+    // 503(混雑)は複雑な指示ほど起きやすいため、コピペモードへの切替を案内する
+    if (err.status === 503) logChat('sys', t('msg.geminiBusy'));
   } finally {
     sendBtn.disabled = false;
   }

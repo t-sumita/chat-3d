@@ -147,7 +147,10 @@ const JA = {
     '② コピーした内容を外部チャットに貼り付けて送信する。\n' +
     '③ 返ってきた回答(コードを含む全文)を下の「外部チャットの回答を貼り付け」欄に貼り付け、' +
     '「貼り付けを実行」を押すとこのシーンに反映されます。',
-  'guide.api': '🔌 API モード: 設定タブに登録した Gemini API キーを使い、指示の送信からコード実行まで自動で行います。',
+  'guide.api': '🔌 API モード: 設定タブに登録した Gemini API キーを使い、指示の送信からコード実行まで自動で行います。\n' +
+    '「2cm角の立方体」のような単純な指示向けです。寸法の調べ物や計算が要る複雑な指示は' +
+    '応答に時間がかかり、Gemini が混雑していると 503(過負荷)になりやすいため、' +
+    'そういう指示にはコピペモードをおすすめします。',
   'copy.summary': '📋 送信用プロンプト(クリックで折りたたみ)',
   'copy.btn': '📋 コピー',
   'copy.ok': '✅ コピーしました',
@@ -309,6 +312,8 @@ const JA = {
   // ── システムメッセージ ──
   'msg.loaded': '{fmt} を読み込みました: {name}',
   'msg.errSeeBelow': 'エラーが発生しました。詳細は下部のエラー欄を参照してください。',
+  'msg.geminiBusy': '💡 Gemini が混雑しています(503)。複雑な指示ほど起こりやすいので、' +
+    '簡単な指示に分けるか、コピペモードでのご利用をおすすめします。',
   'msg.copied': '✅ プロンプトをクリップボードにコピーしました。外部チャットに貼り付けて送信してください。',
   'msg.copyFail': '⚠ クリップボードへのコピーに失敗しました。下に表示したプロンプトを手動で選択してコピーしてください。',
   'msg.cleared': 'シーンをクリアしました(ゼロベース生成モード)。',
@@ -460,7 +465,10 @@ const EN = {
     '2. Paste it into your external chat and send it.\n' +
     '3. Paste the reply (the whole answer, code included) into the “Paste the reply” box below and press ' +
     '“Run pasted reply” to apply it to this scene.',
-  'guide.api': '🔌 API mode: uses the Gemini API key from the Settings tab to send your instruction and run the returned code automatically.',
+  'guide.api': '🔌 API mode: uses the Gemini API key from the Settings tab to send your instruction and run the returned code automatically.\n' +
+    'Best for simple instructions like “a 2cm cube.” Complex instructions that need lookups or ' +
+    'calculations take longer to answer, which makes a 503 (overloaded) more likely when Gemini ' +
+    'is busy — for those, try copy & paste mode instead.',
   'copy.summary': '📋 Prompt to send (click to collapse)',
   'copy.btn': '📋 Copy',
   'copy.ok': '✅ Copied',
@@ -622,6 +630,8 @@ const EN = {
   // ── System messages ──
   'msg.loaded': 'Loaded {fmt}: {name}',
   'msg.errSeeBelow': 'Something went wrong. See the error box below for details.',
+  'msg.geminiBusy': '💡 Gemini is busy (503). This happens more often with complex instructions — ' +
+    'try splitting your request into simpler steps, or switch to copy & paste mode.',
   'msg.copied': '✅ Prompt copied to the clipboard. Paste it into your external chat and send it.',
   'msg.copyFail': '⚠ Could not write to the clipboard. Select the prompt shown below and copy it manually.',
   'msg.cleared': 'Scene cleared (generate-from-scratch mode).',
