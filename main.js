@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
 // 標準の 3MFLoader は複数パート構成の 3MF で component 参照が解決できず落ちるため、
@@ -436,6 +437,13 @@ let settings = loadSettings();
 let gridHelper = null, axesHelper = null;       // 表示補助(グリッド・XYZ 軸)
 let guidesOn = true;                            // 表示補助を出しているか
 let vpW = 0, vpH = 0;                           // ビューポートの実サイズ(毎フレームの再計測を避ける)
+let modelOpacity = 1;                           // 編集中モデルの不透明度(0.15〜1、透過表示用)
+
+// 移動ギズモ(TransformControls)は使い回す1個のインスタンスで、対象だけ差し替える。
+// 「追加予定の図形/テキスト」と「選択中のパーツ」のどちらか一方にのみ付く(同時には付けない)。
+let transformControls = null;
+let previewMesh = null;                         // 結合前の図形/テキストのプレビュー(未確定)
+let gizmoKind = null;                           // ギズモの現在の対象種別: 'shape' | 'text' | 'part' | null
 
 // ─────────────────────────────────────────────────────────────
 // Three.js セットアップ
@@ -457,6 +465,17 @@ function initThree() {
 
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
+
+  // 追加予定の図形/テキスト・選択中パーツを xyz 移動するための共有ギズモ。
+  // 平行移動のみを扱う機能なので translate モード固定(回転・拡縮のハンドルは出さない)。
+  transformControls = new TransformControls(camera, renderer.domElement);
+  transformControls.setMode('translate');
+  transformControls.visible = false;
+  transformControls.enabled = false;
+  // ドラッグ中は視点回転(OrbitControls)と競合するため止める
+  transformControls.addEventListener('dragging-changed', (e) => { controls.enabled = !e.value; });
+  transformControls.addEventListener('objectChange', onGizmoMoved);
+  scene.add(transformControls);
 
   // ライト: 環境光 + 方向光2灯で立体感を出す
   scene.add(new THREE.AmbientLight(0xffffff, 0.6));
@@ -506,8 +525,19 @@ function animate() {
 function defaultMaterial() {
   return new THREE.MeshStandardMaterial({
     color: MODEL_COLOR, metalness: 0.1, roughness: 0.6, side: THREE.DoubleSide,
-    flatShading: false,
+    flatShading: false, transparent: modelOpacity < 1, opacity: modelOpacity,
   });
+}
+
+/**
+ * 編集中モデルの不透明度を変える(奥にある形状やパーツを透かして確認するための表示オプション)。
+ * @param {number} v 0.15〜1
+ */
+function setModelOpacity(v) {
+  modelOpacity = Math.min(1, Math.max(0.15, v));
+  if (!targetMesh || !targetMesh.material) return;
+  const mats = Array.isArray(targetMesh.material) ? targetMesh.material : [targetMesh.material];
+  mats.forEach((m) => { m.transparent = modelOpacity < 1; m.opacity = modelOpacity; });
 }
 
 /** メッシュの geometry / material を破棄してメモリを解放する */
@@ -568,6 +598,60 @@ function frameObject(obj) {
   camera.updateProjectionMatrix();
   controls.target.copy(center);
   controls.update();
+}
+
+// ─────────────────────────────────────────────────────────────
+// 移動ギズモ(結合前の図形/テキスト・選択中パーツの xyz 移動)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 移動ギズモの対象を切り替える。null を渡すと外して隠す。
+ * @param {THREE.Object3D|null} obj 対象
+ * @param {'shape'|'text'|'part'|null} kind 対象の種類(ドラッグ結果を書き戻す xyz 入力欄を決める)
+ */
+function setGizmoTarget(obj, kind) {
+  gizmoKind = obj ? kind : null;
+  if (obj) {
+    transformControls.attach(obj);
+    transformControls.visible = true;
+    transformControls.enabled = true;
+  } else {
+    transformControls.detach();
+    transformControls.visible = false;
+    transformControls.enabled = false;
+  }
+}
+
+/** ギズモをドラッグした結果を、対応する xyz 入力欄へ反映する(TransformControls の objectChange) */
+function onGizmoMoved() {
+  const obj = transformControls.object;
+  if (!obj) return;
+  const ids = {
+    shape: ['prim-x', 'prim-y', 'prim-z'],
+    text: ['text-x', 'text-y', 'text-z'],
+    part: ['part-x', 'part-y', 'part-z'],
+  }[gizmoKind];
+  if (!ids) return;
+  document.getElementById(ids[0]).value = obj.position.x.toFixed(1);
+  document.getElementById(ids[1]).value = obj.position.y.toFixed(1);
+  document.getElementById(ids[2]).value = obj.position.z.toFixed(1);
+}
+
+/** 結合前プレビュー用の半透明マテリアル(パーツ選択時の強調表示と同じ配色で「未確定」を示す) */
+function previewMaterial() {
+  return new THREE.MeshStandardMaterial({
+    color: 0xffb347, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide,
+  });
+}
+
+/** 追加予定の図形/テキストのプレビューを消す */
+function clearAddPreview() {
+  if (previewMesh) {
+    scene.remove(previewMesh);
+    disposeMesh(previewMesh);
+    previewMesh = null;
+  }
+  if (gizmoKind === 'shape' || gizmoKind === 'text') setGizmoTarget(null, null);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -905,6 +989,8 @@ function clearParts() {
   parts = [];
   selectedPart = -1;
   removePartHighlight();
+  // ギズモがパーツに付いていた場合だけ外す(図形/テキストのプレビューに付いている場合は触らない)
+  if (gizmoKind === 'part') setGizmoTarget(null, null);
   const list = document.getElementById('parts-list');
   const ops = document.getElementById('parts-ops');
   if (list) { list.innerHTML = ''; list.classList.add('hidden'); }
@@ -960,11 +1046,15 @@ function selectPart(i) {
   document.getElementById('parts-ops').classList.toggle('hidden', i < 0);
 
   removePartHighlight();
-  if (i < 0 || !parts[i]) return;
+  if (i < 0 || !parts[i]) { setGizmoTarget(null, null); return; }
+  clearAddPreview();
   partHighlight = new THREE.Mesh(
     parts[i].geometry.clone(),
     new THREE.MeshBasicMaterial({ color: 0xffb347, wireframe: true, transparent: true, opacity: 0.9 }));
   scene.add(partHighlight);
+  // 移動量は原点(0,0,0)からの相対値として毎回リセットする(パーツ自体は絶対座標のジオメトリ)
+  ['part-x', 'part-y', 'part-z'].forEach((id) => { document.getElementById(id).value = '0'; });
+  setGizmoTarget(partHighlight, 'part');
 }
 
 /** 選択中パーツだけを、そのパーツの中心を基準に拡大縮小して全体を組み直す */
@@ -984,6 +1074,22 @@ async function scaleSelectedPart(sx, sy, sz) {
     g.scale(sx, sy, sz);
     g.translate(c.x, c.y, c.z);
 
+    const merged = mergeGeometries(
+      parts.map((p, i) => (i === selectedPart ? g : p.geometry)), false);
+    if (!merged) throw new Error(t('err.partMergeFail'));
+    g.dispose();
+    commitGeometry(merged);
+  });
+}
+
+/** 選択中パーツを xyz だけ平行移動して全体を組み直す(ギズモ/数値入力どちらでも同じ経路を通る) */
+async function moveSelectedPart(dx, dy, dz) {
+  if (selectedPart < 0 || !parts[selectedPart]) return;
+  if (dx === 0 && dy === 0 && dz === 0) return;
+  await withBusy(t('busy.partMove'), () => {
+    const target = parts[selectedPart];
+    const g = target.geometry.clone();
+    g.translate(dx, dy, dz);
     const merged = mergeGeometries(
       parts.map((p, i) => (i === selectedPart ? g : p.geometry)), false);
     if (!merged) throw new Error(t('err.partMergeFail'));
@@ -1256,17 +1362,21 @@ async function loadTextFont() {
   return cachedFont;
 }
 
-/** 入力値から立体テキストのメッシュを組み立てる */
-async function buildTextMesh() {
+/**
+ * 入力値から立体テキストのメッシュを組み立てる。
+ * @param {boolean} [silent=false] true ならエラーをトースト表示せず null を返す
+ *   (プレビューの毎キー入力再構築で、入力途中の空文字・非対応文字にまで
+ *   エラーを出さないようにするため)。
+ */
+async function buildTextMesh(silent = false) {
   const value = document.getElementById('text-value').value.trim();
   if (!value) {
-    showError(new Error(t('err.textEmpty')), t('err.inputTitle'));
+    if (!silent) showError(new Error(t('err.textEmpty')), t('err.inputTitle'));
     return null;
   }
   // helvetiker は日本語グリフを持たないため、非対応文字は明示的に弾く
   if (!/^[\x20-\x7E]+$/.test(value)) {
-    showError(
-      new Error(t('err.textChars')), t('err.textCharsTitle'));
+    if (!silent) showError(new Error(t('err.textChars')), t('err.textCharsTitle'));
     return null;
   }
   const font = await loadTextFont();
@@ -1276,8 +1386,33 @@ async function buildTextMesh() {
   const geo = new TextGeometry(value, { font, size, height: depth, curveSegments: 8, bevelEnabled: false });
   geo.center();
   const mesh = new THREE.Mesh(geo);
-  mesh.position.y = Number(document.getElementById('text-y').value) || 0;
+  mesh.position.set(
+    Number(document.getElementById('text-x').value) || 0,
+    Number(document.getElementById('text-y').value) || 0,
+    Number(document.getElementById('text-z').value) || 0);
   return mesh;
+}
+
+/** 図形パネルの入力値からプレビューを作り直す(結合前・ドラッグ/数値入力で移動できる) */
+function refreshShapePreview() {
+  if (selectedPart >= 0) selectPart(-1);
+  if (previewMesh) { scene.remove(previewMesh); disposeMesh(previewMesh); }
+  previewMesh = buildPrimitive();
+  previewMesh.material = previewMaterial();
+  scene.add(previewMesh);
+  setGizmoTarget(previewMesh, 'shape');
+}
+
+/** テキストパネルの入力値からプレビューを作り直す(文字が空/未対応/フォント未ロードなら消すだけ) */
+async function refreshTextPreview() {
+  const mesh = await buildTextMesh(true);
+  if (!mesh) { clearAddPreview(); return; }
+  if (selectedPart >= 0) selectPart(-1);
+  if (previewMesh) { scene.remove(previewMesh); disposeMesh(previewMesh); }
+  previewMesh = mesh;
+  previewMesh.material = previewMaterial();
+  scene.add(previewMesh);
+  setGizmoTarget(previewMesh, 'text');
 }
 
 /**
@@ -2246,6 +2381,14 @@ function setChatMode(mode, announce = true) {
 function initEditUI() {
   const num = (id) => Number(document.getElementById(id).value);
 
+  // 透過表示(編集中モデルの不透明度)
+  const opacitySlider = document.getElementById('model-opacity');
+  const opacityVal = document.getElementById('model-opacity-val');
+  opacitySlider.addEventListener('input', () => {
+    setModelOpacity(Number(opacitySlider.value) / 100);
+    opacityVal.textContent = `${opacitySlider.value}%`;
+  });
+
   // 全体倍率 / XYZ 個別倍率
   document.getElementById('btn-scale-all').addEventListener('click', () => {
     const s = num('scale-all');
@@ -2263,12 +2406,18 @@ function initEditUI() {
   // 消しゴム
   document.getElementById('btn-eraser').addEventListener('click', () => setEraser(!eraserOn));
 
-  // パーツ分割
+  // パーツ分割(パネルを閉じたら選択・ギズモも解除する)
+  document.getElementById('sec-parts').addEventListener('toggle', (e) => {
+    if (!e.target.open && selectedPart >= 0) selectPart(-1);
+  });
   document.getElementById('btn-split').addEventListener('click', runSplitParts);
   document.getElementById('btn-part-scale').addEventListener('click', () => {
     scaleSelectedPart(num('part-sx'), num('part-sy'), num('part-sz'));
   });
   document.getElementById('btn-part-delete').addEventListener('click', deleteSelectedPart);
+  document.getElementById('btn-part-move').addEventListener('click', () => {
+    moveSelectedPart(num('part-x'), num('part-y'), num('part-z'));
+  });
 
   // 図形の追加 / 削り
   document.getElementById('btn-prim-add').addEventListener('click', () => {
@@ -2288,6 +2437,41 @@ function initEditUI() {
     if (m) subtractShape(m, t('busy.textSub'));
   });
 
+  // 図形・テキストを追加パネル: 開いている間だけ結合前プレビューをギズモで動かせるようにする。
+  // ドラッグ/数値入力のどちらで動かしても、追加(結合)時は現在の入力値をそのまま使う
+  // (buildPrimitive/buildTextMesh が常に入力欄を読むため、プレビューを別経路で扱う必要がない)。
+  const addSec = document.getElementById('sec-add-shape');
+  addSec.addEventListener('toggle', () => {
+    if (addSec.open) refreshShapePreview(); else clearAddPreview();
+  });
+  document.getElementById('prim-kind').addEventListener('change', () => {
+    if (addSec.open) refreshShapePreview();
+  });
+  ['prim-w', 'prim-h', 'prim-d'].forEach((id) => {
+    document.getElementById(id).addEventListener('input', () => {
+      if (addSec.open) refreshShapePreview();
+    });
+  });
+  ['prim-x', 'prim-y', 'prim-z'].forEach((id) => {
+    document.getElementById(id).addEventListener('input', () => {
+      if (previewMesh && gizmoKind === 'shape') {
+        previewMesh.position.set(num('prim-x'), num('prim-y'), num('prim-z'));
+      }
+    });
+  });
+  ['text-value', 'text-size', 'text-depth'].forEach((id) => {
+    document.getElementById(id).addEventListener('input', () => {
+      if (addSec.open) refreshTextPreview();
+    });
+  });
+  ['text-x', 'text-y', 'text-z'].forEach((id) => {
+    document.getElementById(id).addEventListener('input', () => {
+      if (previewMesh && gizmoKind === 'text') {
+        previewMesh.position.set(num('text-x'), num('text-y'), num('text-z'));
+      }
+    });
+  });
+
   // undo / redo(ボタンとショートカット)
   document.getElementById('btn-undo').addEventListener('click', undo);
   document.getElementById('btn-redo').addEventListener('click', redo);
@@ -2305,15 +2489,19 @@ function initEditUI() {
   // Shift を押していれば座標ピック、押していなければ消しゴム(消しゴムが ON のときだけ)。
   let downAt = null;
   renderer.domElement.addEventListener('pointerdown', (e) => {
-    downAt = { x: e.clientX, y: e.clientY, shift: e.shiftKey };
+    // 移動ギズモの矢印を掴んだ場合は TransformControls 側の pointerdown が先に走り
+    // dragging が true になる(このリスナーは initThree() での登録より後に付くため)。
+    // その場合は消しゴム/ピックの対象にしない。
+    downAt = { x: e.clientX, y: e.clientY, shift: e.shiftKey, gizmo: transformControls.dragging };
   });
   renderer.domElement.addEventListener('pointerup', (e) => {
     if (!downAt) return;
     const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
     // 押し始めと離したときのどちらで Shift を握っていても座標ピックとして扱う
     const shift = downAt.shift || e.shiftKey;
+    const gizmo = downAt.gizmo;
     downAt = null;
-    if (moved >= 5) return;
+    if (gizmo || moved >= 5) return;
     if (shift) pickAtPointer(e);
     else eraseAtPointer(e);
   });

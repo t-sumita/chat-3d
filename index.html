@@ -170,6 +170,13 @@
         <p class="hint" data-i18n-html="edit.hint"></p>
         <p id="edit-size" class="edit-size">モデル未読み込み</p>
 
+        <!-- 透過表示(奥の形状・パーツを透かして確認する) -->
+        <div class="edit-row">
+          <span class="edit-label" data-i18n="edit.opacity">不透明度</span>
+          <input id="model-opacity" type="range" min="15" max="100" value="100" step="5" />
+          <span id="model-opacity-val" class="edit-unit">100%</span>
+        </div>
+
         <!-- 拡大・縮小 -->
         <details class="edit-sec" open>
           <summary data-i18n="edit.secScale">拡大・縮小</summary>
@@ -214,7 +221,7 @@
         </details>
 
         <!-- パーツ分割 -->
-        <details class="edit-sec">
+        <details id="sec-parts" class="edit-sec">
           <summary data-i18n="edit.secParts">パーツ分割・個別編集</summary>
           <div class="edit-note" data-i18n="edit.partsNote"></div>
           <div class="row-end">
@@ -232,11 +239,21 @@
               <button id="btn-part-delete" class="btn btn-ghost" type="button" data-i18n="edit.partDelete">このパーツを削除</button>
               <button id="btn-part-scale" class="btn btn-primary" type="button" data-i18n="edit.partApply">パーツに適用</button>
             </div>
+
+            <div class="edit-note edit-sep" data-i18n="edit.partsMoveNote"></div>
+            <div class="edit-xyz">
+              <label><span>X</span><input id="part-x" type="number" value="0" step="1" /></label>
+              <label><span>Y</span><input id="part-y" type="number" value="0" step="1" /></label>
+              <label><span>Z</span><input id="part-z" type="number" value="0" step="1" /></label>
+            </div>
+            <div class="row-end">
+              <button id="btn-part-move" class="btn btn-primary" type="button" data-i18n="edit.partMove">移動を適用</button>
+            </div>
           </div>
         </details>
 
         <!-- 図形・テキストの追加 -->
-        <details class="edit-sec">
+        <details id="sec-add-shape" class="edit-sec">
           <summary data-i18n="edit.secAdd">図形・テキストを追加</summary>
           <div class="edit-row">
             <span class="edit-label" data-i18n="edit.shape">図形</span>
@@ -267,10 +284,17 @@
           <div class="edit-row">
             <input id="text-value" type="text" placeholder="TEXT" maxlength="40" />
           </div>
+          <div class="edit-row">
+            <span class="edit-label" data-i18n="edit.textSize">文字高</span>
+            <input id="text-size" type="number" value="10" step="1" min="1" />
+            <span class="edit-label" data-i18n="edit.textDepth">厚み</span>
+            <input id="text-depth" type="number" value="3" step="0.5" min="0.1" />
+          </div>
+          <div class="edit-note" data-i18n="edit.posNote">配置する位置(mm・原点が中心)</div>
           <div class="edit-xyz">
-            <label><span data-i18n="edit.textSize">文字高</span><input id="text-size" type="number" value="10" step="1" min="1" /></label>
-            <label><span data-i18n="edit.textDepth">厚み</span><input id="text-depth" type="number" value="3" step="0.5" min="0.1" /></label>
-            <label><span data-i18n="edit.textY">Y位置</span><input id="text-y" type="number" value="0" step="1" /></label>
+            <label><span>X</span><input id="text-x" type="number" value="0" step="1" /></label>
+            <label><span>Y</span><input id="text-y" type="number" value="0" step="1" /></label>
+            <label><span>Z</span><input id="text-z" type="number" value="0" step="1" /></label>
           </div>
           <div class="row-between">
             <button id="btn-text-sub" class="btn btn-ghost" type="button" data-i18n="edit.textSub">文字を彫る</button>
@@ -362,7 +386,7 @@
       sitesJsonPath: 'config/subutomo-sites.json',
       logoPath: './common/assets/logo.png',
       theme: 'dark-bg',
-      version: '0.15.0',
+      version: '0.16.0',
       privacy: { localStorage: true, analytics: false },
       onSecretAction: null
     };

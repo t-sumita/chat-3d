@@ -295,6 +295,84 @@ LLM は形を見ていないため、位置は座標(mm)でしか伝えられな
 - いずれも「結合(`unionShape`)」「削り取り(`subtractShape`)」の両方に流せる。
   空シーンで結合した場合は CSG を通さず、そのメッシュ自体を最初の `targetMesh` にする。
 
+## 透過表示 / 移動ギズモ(v0.16.0)
+
+### 透過表示(`modelOpacity`)
+「編集」タブにスライダー(`#edit-opacity`)を 1 本置き、`targetMesh` 全体の不透明度を
+切り替える。パーツ単位ではなく全体を透かす仕様(内部を透けて見たいだけで、パーツごとの
+差別化までは要らないという判断)。`setModelOpacity(v)` が `targetMesh.material`
+(配列の場合は全要素)に `transparent` / `opacity` を書き戻し、`defaultMaterial()` も
+生成時点でこの値を参照する(スライダーを動かした後に再読込・再生成しても値が保たれる)。
+下限は `0.15`(0 に近づけると裏側のクリックやピックが事実上不能になるため、完全な
+非表示までは許さない)。
+
+### 移動ギズモ(`TransformControls`)の共有・排他設計
+このアプリはシーン内に `targetMesh` を 1 個しか持たない設計だが、今回「結合前の
+図形/テキストのプレビュー」と「パーツ分割で選択中のパーツ」という、`targetMesh` とは
+別に動かしたい一時オブジェクトが 2 種類できた。どちらも独立した `Object3D` の実体は
+持つが、同時に複数動かす要求はない(結合前プレビューを弄っている間はパーツ選択の
+意味がなく、逆も同様)ため、`TransformControls` は `initThree()` で 1 個だけ生成し、
+`setGizmoTarget(obj, kind)` で attach 先を差し替える使い回し方式にした。
+`kind` は `'shape' | 'text' | 'part' | null` のいずれかを `gizmoKind` に保持し、
+どちらの対象に付いているかで数値入力欄(`prim-x/y/z` / `text-x/y/z` / `part-x/y/z`)の
+同期先を判定する(`onGizmoMoved()`)。モードは `translate` 固定(回転・拡大はこの
+2 用途では不要)。
+
+- 排他は「後から選んだ側が前の対象を明示的に解除する」形で実装する。
+  `selectPart(i)` はパーツ選択時に `clearAddPreview()` を呼んで図形/テキストの
+  プレビューを消し、逆に図形/テキストのパネルを開いた/編集した側は `selectPart(-1)`
+  を呼んでパーツ選択を解除する。
+- `commitGeometry()` は編集を確定するたびに `clearParts()` を呼ぶが、これは無条件に
+  ギズモを外すと**図形プレビューの途中で消しゴムを使っただけでプレビューが消える**
+  事故になる。そのため `clearParts()` 内の解除は `gizmoKind === 'part'` のときだけに
+  限定し、`shape`/`text` のプレビューは無関係な編集をまたいで生き残る。
+- `dragging-changed` イベントで `controls.enabled`(OrbitControls)を止める/戻す。
+  ギズモをドラッグしている間に視点回転が同時に反応すると操作にならないため。
+
+### クリック判定への割り込み(消しゴム/座標ピックとの競合回避)
+`TransformControls` は `renderer.domElement` に自前の `pointerdown` を
+`initThree()` の時点(=編集用の `pointerdown`/`pointerup` より前)で登録しており、
+ハンドルに当たった場合はその場で同期的に `dragging = true` にする。この実行順を
+利用し、既存の消しゴム/座標ピックの `pointerdown` ハンドラで `transformControls.dragging`
+を読んで `downAt.gizmo` に控え、`pointerup` 側でギズモ操作だったときは
+`eraseAtPointer()` / `pickAtPointer()` を呼ばないようにした。新しい状態機械を
+足さずに済んでいる。
+
+### 結合前プレビュー(`previewMesh`)
+図形/テキストは、従来は入力欄の値をその場で読んで即座に `unionShape`/`subtractShape`
+していたが、それでは「結合する前に位置を目で見て微調整する」ことができない。
+そこで `sec-add-shape` の `<details>` が開いている間だけ、半透明(オレンジ・
+opacity 0.55・`depthWrite:false`)の `previewMesh` を追加し、パラメータ入力欄の
+`change`/`input` のたびに `refreshShapePreview()` / `refreshTextPreview()` で
+作り直してギズモを付け直す。ギズモでドラッグすれば `onGizmoMoved()` が
+`prim-x/y/z`/`text-x/y/z` に書き戻し、逆に数値入力を直接編集すれば
+`previewMesh.position` へ反映する(双方向)。
+
+実際に「追加(結合)」/「この形で削る」を押したときの処理(`unionShape`/
+`subtractShape`)は**変更していない**。これらは今まで通り `buildPrimitive()`/
+`buildTextMesh()` で入力欄を再読込して確定メッシュを作る。プレビューはその入力欄と
+同期しているだけなので、「プレビューの位置」と「確定時に使われる位置」の二重管理が
+生まれない。`buildTextMesh` はプレビュー用の再構築で毎回エラーダイアログを出さないよう
+`silent` 引数を足した(フォント未ロードや空文字の入力途中はエラー扱いにしない)。
+
+確定後も `previewMesh` はあえて破棄しない(近い位置にもう 1 個置きたいケースを
+想定し、armed のまま残す)。破棄するのはパネルを閉じた(`sec-add-shape` の toggle)
+ときと、次のプレビュー再構築の直前のみ。
+
+### パーツ移動(`moveSelectedPart`)
+既存の `scaleSelectedPart()` と同じ形(対象パーツだけ複製・加工し、他パーツと
+`mergeGeometries` で結合し直して `commitGeometry()`)で実装した。パーツ分割
+(`splitConnectedComponents`)で得られる各パーツの頂点座標は、分割前の絶対座標を
+そのまま焼き込んだものであり、パーツ自身が独立した `Object3D`/`position` を
+持たない。そのため `part-x/y/z` の数値は「絶対座標」ではなく**選択時点からの
+移動量(オフセット)**として扱う。`selectPart(i)` でパーツを選び直すたびに
+`0` にリセットされる。強調表示用の `partHighlight` はジオメトリ自体が既に
+絶対座標を持つため `Object3D.position` は生成時 `(0,0,0)` のままで、ギズモを
+ドラッグして動いた分の `position` がそのまま移動量(オフセット)になる。
+`onGizmoMoved()` はこの `position` を `part-x/y/z` へそのまま書き戻すだけでよく、
+`moveSelectedPart(dx,dy,dz)` は受け取ったオフセットをそのまま
+`geometry.translate(dx,dy,dz)` に渡す。
+
 ## 3MF 読み込み
 - `ThreeMFLoader.parse(buffer)` はシーンに追加していない `THREE.Group` を同期的に返す。
 - `group.updateMatrixWorld(true)` を呼んでから各 `Mesh` を走査し、`position` 属性(と
@@ -445,7 +523,7 @@ Google は個別のモデル ID(`gemini-2.5-flash` 等)を新規ユーザー向�
   現状は作れない「中止」ボタンも実現できる。実行前ガードはその代替（次善策）である。
 - **IndexedDB への自動保存**。現状はリロード/タブ強制終了で作業内容が消える。
 - 日本語フォント対応(現状のテキスト追加は半角英数記号のみ)。
-- パーツの平行移動・回転(現状は拡大縮小と削除のみ)。
+- パーツの回転(現状は移動・拡大縮小・削除のみ)。
 - 生成コード履歴の保存 / 再実行。
 - three-csg-ts の演算失敗（非多様体メッシュ等）に対するリカバリ提示。
 - glTF / OBJ など STL 以外の入出力。
