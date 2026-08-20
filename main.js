@@ -27,7 +27,7 @@ const LS_KEY = 'chat3d.settings.v1';          // localStorage キー
 const MODEL_COLOR = 0x9ec5ff;                  // 生成メッシュの既定色
 const EXEC_HISTORY_MAX = 20;                   // 所要時間の推定に使う実行履歴の保持件数
 const UNDO_MAX = 12;                           // undo 履歴の保持段数(ジオメトリ実体を持つため控えめ)
-const PROMPT_VERSION = 4;                      // DEFAULT_SYSTEM_PROMPT を更新したら上げる
+const PROMPT_VERSION = 5;                      // DEFAULT_SYSTEM_PROMPT を更新したら上げる
 const TRI_WARN = 20000;                        // これを超えたら「重い処理」として強い警告を出す
 const TRI_CONFIRM = 60000;                     // これを超えたら実行前に明示的な確認を求める
 const WELD_PRECISION = 1e4;                    // パーツ分割・水密化で頂点を同一視する量子化精度
@@ -55,6 +55,9 @@ const DEFAULT_SYSTEM_PROMPT_JA = `あなたは Three.js と three-csg-ts に精�
   - setResult  : setResult(mesh) で最終メッシュを1つ登録する関数
   - mergeMeshes: mergeMeshes([mesh, ...]) で複数メッシュを CSG を使わず1つに合成する関数
                  (重なっていない形状専用。複数の切削体をまとめて subtract を1回に減らす用途)
+  - createTextMesh: createTextMesh({ text, size, depth, position, rotation }) で立体文字メッシュを
+                    1つ返す関数。フォント読込・グリフ生成はアプリ側が行う(自前で TextGeometry は
+                    作れません)。半角英数記号のみ。浮き彫りは CSG.union、彫り込みは CSG.subtract で使う。
 - 単位は mm を 1 とみなして数値を組み立ててください(例: 40mm = 40)。
 
 # 厳守するルール
@@ -124,6 +127,15 @@ CSG は 1 回ごとにメッシュ全体を再分割するため、使わずに�
   不正な三角形が生まれ、STL が壊れる原因になります。
 - openEnded は false のままにすること(CSG には閉じた立体が必要です)。
 
+# 文字を入れるとき
+- 立体文字は自前で TextGeometry を作らず、必ず createTextMesh(...) を使うこと
+  (フォントは実行環境が用意します。自前ではフォントを読み込めません)。
+- 例(上面に浮き彫り):
+    const label = createTextMesh({ text: 'A1', size: 8, depth: 1, position: [0, 0, 20.5] });
+    box.updateMatrix(); label.updateMatrix();
+    setResult(CSG.union(box, label));   // 彫り込むなら CSG.subtract(box, label)
+- 半角英数記号のみ(日本語不可)。curveSegments 等は内部で最小化済みなので調整不要。
+
 # 出力フォーマット
 \`\`\`js
 // ここに実行可能な処理本体だけを書く(トップレベル文として)
@@ -146,6 +158,10 @@ You turn the user's instructions into JavaScript that runs immediately in the br
   - mergeMeshes: mergeMeshes([mesh, ...]) merges several meshes into one WITHOUT CSG
                  (non-overlapping shapes only; use it to collapse many cutters
                  into a single subtract call)
+  - createTextMesh: createTextMesh({ text, size, depth, position, rotation }) returns one
+                    solid-text mesh; the app handles font loading and glyph geometry
+                    (you cannot build TextGeometry yourself). ASCII only.
+                    Union it to emboss, subtract it to engrave.
 - One unit is one millimetre (40 mm = 40).
 
 # Hard rules
@@ -216,6 +232,15 @@ The defaults (32 and such) are meant for decoration and are excessive. Follow th
 - Make the cutter for a through-hole overshoot by at least 0.5 mm at both ends.
   Exactly coincident faces produce invalid triangles and break the STL.
 - Leave openEnded as false (CSG needs closed solids).
+
+# Adding text
+- Do not build TextGeometry yourself; always use createTextMesh(...)
+  (the runtime provides the font; your code cannot load one).
+- Example (emboss on the top face):
+    const label = createTextMesh({ text: 'A1', size: 8, depth: 1, position: [0, 0, 20.5] });
+    box.updateMatrix(); label.updateMatrix();
+    setResult(CSG.union(box, label));   // use CSG.subtract(box, label) to engrave
+- ASCII characters only (no Japanese). No need to tune curveSegments (already minimised).
 
 # Output format
 \`\`\`js
@@ -1255,6 +1280,44 @@ async function buildTextMesh() {
   return mesh;
 }
 
+/**
+ * 実行コンテキストに注入する立体テキスト生成ヘルパー。
+ * LLM / 貼り付けコードは「文字列・サイズ・厚み・位置・向き」だけを指定し、
+ * フォント読込・グリフ幾何・分割数の管理はアプリ側が担う(QR で検討した発想の転用)。
+ * 実行環境にはフォントが渡らないため、自前の TextGeometry では文字を作れない。
+ * 凸(浮き彫り)か凹(彫り込み)かは、返ったメッシュを呼び出し側が
+ * CSG.union / CSG.subtract のどちらに渡すかで選ぶ。
+ * フォントは同期利用できるよう起動時に事前ロード済み(loadTextFont)。
+ * @param {object} [opts]
+ * @param {string} opts.text 埋め込む文字列(helvetiker のため半角英数記号のみ)
+ * @param {number} [opts.size=10] 文字高(mm)
+ * @param {number} [opts.depth=2] 厚み(mm)
+ * @param {number[]} [opts.position] 配置位置 [x, y, z](mm)
+ * @param {number[]} [opts.rotation] 回転 [x, y, z](ラジアン)
+ * @returns {THREE.Mesh} 中央原点で、指定の位置・回転を反映した立体テキスト
+ */
+function createTextMesh(opts = {}) {
+  const value = String(opts.text == null ? '' : opts.text).trim();
+  if (!value) throw new Error(t('err.textEmpty'));
+  // helvetiker は日本語グリフを持たないため、非対応文字は明示的に弾く
+  if (!/^[\x20-\x7E]+$/.test(value)) throw new Error(t('err.textChars'));
+  // 起動時の事前ロードが未完了(ネットワーク遅延など)なら、再実行を促す
+  if (!cachedFont) throw new Error(t('err.fontLoading'));
+
+  const size = Math.max(0.1, Number(opts.size) || 10);
+  const depth = Math.max(0.1, Number(opts.depth) || 2);
+  // 分割数は 2 固定。印刷では曲線の滑らかさは出ず、増やしても三角形の無駄になる
+  const geo = new TextGeometry(value,
+    { font: cachedFont, size, height: depth, curveSegments: 2, bevelEnabled: false });
+  geo.center();
+  const mesh = new THREE.Mesh(geo, defaultMaterial());
+
+  const p = opts.position, r = opts.rotation;
+  if (Array.isArray(p)) mesh.position.set(p[0] || 0, p[1] || 0, p[2] || 0);
+  if (Array.isArray(r)) mesh.rotation.set(r[0] || 0, r[1] || 0, r[2] || 0);
+  return mesh;
+}
+
 /** 画面上のモード/メッシュ状態バッジを更新する */
 function updateBadges() {
   const modeBadge = document.getElementById('mode-badge');
@@ -1772,7 +1835,7 @@ function nextPaint() {
 
 /**
  * 抽出済み JS を new Function で実行し、結果メッシュでシーンを更新する。
- * scene / THREE / CSG / targetMesh / setResult を引数として渡す。
+ * scene / THREE / CSG / targetMesh / setResult / mergeMeshes / createTextMesh を引数として渡す。
  *
  * CSG は同期処理でメインスレッドを占有するため、実行中の進捗更新はできない。
  * そのため「実行前にオーバーレイを描画 → 実行 → 実測値を報告」という形にしている。
@@ -1814,9 +1877,9 @@ async function runUserCode(code) {
   try {
     // 'use strict' を付けて、暗黙のグローバル汚染を防ぐ
     const fn = new Function(
-      'scene', 'THREE', 'CSG', 'targetMesh', 'setResult', 'mergeMeshes',
+      'scene', 'THREE', 'CSG', 'targetMesh', 'setResult', 'mergeMeshes', 'createTextMesh',
       '"use strict";\n' + code);
-    const ret = fn(scene, THREE, CSG, targetMesh, setResult, mergeMeshes);
+    const ret = fn(scene, THREE, CSG, targetMesh, setResult, mergeMeshes, createTextMesh);
     elapsed = performance.now() - t0;
 
     // setResult 優先。無ければ return 値をメッシュとして扱う
@@ -2623,6 +2686,10 @@ function main() {
   initViewTools();
   updateBadges();
   resetHistory();
+  // 立体テキスト用フォントを事前ロード。createTextMesh を同期で呼べるようにするため
+  // (実行時にフォント待ちが挟まらないよう、起動直後に暖めておく)。失敗は握り潰さず、
+  // 実際に createTextMesh が呼ばれたときに err.fontLoading として通知される。
+  loadTextFont().catch(() => {});
   logChat('sys', t('msg.welcome1'));
   logChat('sys', t('msg.welcome2'));
   setChatMode('copy');

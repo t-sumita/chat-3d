@@ -28,9 +28,22 @@ Chat 3D は「UI 骨格(index.html)」「中核ロジック(main.js)」「テー
 
 ## 動的コード実行エンジン
 - `extractCode(text)` — ` ```js ... ``` ` フェンスがあれば中身、無ければ全文。
-- `runUserCode(code)` — `new Function('scene','THREE','CSG','targetMesh','setResult', code)` で実行。
+- `runUserCode(code)` — `new Function('scene','THREE','CSG','targetMesh','setResult','mergeMeshes','createTextMesh', code)` で実行。
   - `setResult(mesh)` 優先、無ければ `return` 値をメッシュとして採用。
   - 例外は `showError()` で UI にスタックトレースを表示（握りつぶさない）。
+
+### 立体テキストのヘルパー注入（`createTextMesh`）
+実行コンテキストには `FontLoader` / `TextGeometry` / フォントを渡していないため、LLM や
+貼り付けコードは自前で 3D 文字を作れない。そこで「文字列・サイズ・厚み・位置・向き」だけを
+受け取り、フォント読込・グリフ幾何・分割数(印刷では効かないため `curveSegments:2` 固定)を
+アプリ側で担う `createTextMesh(opts)` を注入する。凸(浮き彫り)/凹(彫り込み)は、返った
+メッシュを呼び出し側が `CSG.union` / `CSG.subtract` のどちらに渡すかで選ぶ。
+- フォントは起動時に `loadTextFont()` で事前ロードし、ヘルパーは**同期**で使える。
+  未ロード(ネットワーク遅延など)なら `err.fontLoading` を投げて再実行を促す。
+- 半角英数記号のみ(helvetiker に日本語グリフが無い)。編集タブの直接テキスト追加
+  (`buildTextMesh`)と制約は共通だが、そちらは中央固定+Y位置のみ、こちらは任意の
+  位置・向きを取れる点が異なる。システムプロンプト(`DEFAULT_SYSTEM_PROMPT_*`)に
+  使い方を明記し、`PROMPT_VERSION` を上げて配布する。
 
 ### 実行中の進捗表示（重要な制約）
 CSG は**同期処理でメインスレッドを占有する**ため、実行中に JS から進捗を更新することは

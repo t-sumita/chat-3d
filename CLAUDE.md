@@ -65,11 +65,17 @@ UI 文言は `i18n.js` の `JA` / `EN` 辞書、LLM に渡すもの(システム
 ユーザー/LLM のコードには次が引数として渡される。仕様を変える場合はシステム
 プロンプト(`DEFAULT_SYSTEM_PROMPT_JA` / `_EN`)とサンプル(`SAMPLE_CODE_JA` / `_EN`)も
 同時に更新する。
-- `scene` / `THREE` / `CSG` / `targetMesh` / `setResult(mesh)` / `mergeMeshes(meshes)`
+- `scene` / `THREE` / `CSG` / `targetMesh` / `setResult(mesh)` / `mergeMeshes(meshes)` /
+  `createTextMesh(opts)`
 - 完成メッシュは `setResult(mesh)` で 1 つだけ登録する(scene への add は側が行う)。
 - CSG 演算の前に各メッシュで `updateMatrix()` を呼ぶ(位置・回転の反映)。
 - `mergeMeshes([...])` は CSG を使わない合成。複数の切削体を 1 つにまとめて
   `subtract` の回数を減らし、三角形数を抑えるためのもの(重なる形状には使えない)。
+- `createTextMesh({text,size,depth,position,rotation})` は立体文字を 1 つ返す。実行環境には
+  フォント/`FontLoader`/`TextGeometry` を渡さない(LLM が自前で文字を作れない)ため、
+  文字はこのヘルパー経由に一本化する。フォントは起動時に `loadTextFont()` で事前ロードし、
+  ヘルパーは同期呼び出しにする(未ロード時は `err.fontLoading` で再実行を促す)。
+  半角英数記号のみ(helvetiker)。凸/凹は呼び出し側が `CSG.union` / `CSG.subtract` で選ぶ。
 
 ## 三角形数の抑制(方針)
 CSG は結果の三角形数を増やし、多いと(a)実行が数分かかりブラウザが落ちる
