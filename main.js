@@ -473,7 +473,12 @@ function initThree() {
   transformControls.visible = false;
   transformControls.enabled = false;
   // ドラッグ中は視点回転(OrbitControls)と競合するため止める
-  transformControls.addEventListener('dragging-changed', (e) => { controls.enabled = !e.value; });
+  transformControls.addEventListener('dragging-changed', (e) => {
+    controls.enabled = !e.value;
+    // パーツのドラッグは「離した時点」で確定し、そのまま undo 履歴に積む
+    // (図形/テキストのプレビューは CSG の結合方法を選ぶ必要があるため、ここでは確定しない)
+    if (!e.value && gizmoKind === 'part') applyPartMoveFromFields();
+  });
   transformControls.addEventListener('objectChange', onGizmoMoved);
   scene.add(transformControls);
 
@@ -1096,6 +1101,15 @@ async function moveSelectedPart(dx, dy, dz) {
     g.dispose();
     commitGeometry(merged);
   });
+}
+
+/**
+ * part-x/y/z 欄の現在値でパーツ移動を確定する。
+ * 「移動を適用」ボタンと、ギズモのドラッグ終了(dragging-changed)の両方から呼ぶ共通経路。
+ */
+function applyPartMoveFromFields() {
+  const val = (id) => Number(document.getElementById(id).value) || 0;
+  moveSelectedPart(val('part-x'), val('part-y'), val('part-z'));
 }
 
 /** 選択中パーツを削除して全体を組み直す */
@@ -2415,9 +2429,7 @@ function initEditUI() {
     scaleSelectedPart(num('part-sx'), num('part-sy'), num('part-sz'));
   });
   document.getElementById('btn-part-delete').addEventListener('click', deleteSelectedPart);
-  document.getElementById('btn-part-move').addEventListener('click', () => {
-    moveSelectedPart(num('part-x'), num('part-y'), num('part-z'));
-  });
+  document.getElementById('btn-part-move').addEventListener('click', applyPartMoveFromFields);
 
   // 図形の追加 / 削り
   document.getElementById('btn-prim-add').addEventListener('click', () => {

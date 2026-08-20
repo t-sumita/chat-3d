@@ -373,6 +373,22 @@ opacity 0.55・`depthWrite:false`)の `previewMesh` を追加し、パラメー�
 `moveSelectedPart(dx,dy,dz)` は受け取ったオフセットをそのまま
 `geometry.translate(dx,dy,dz)` に渡す。
 
+**ギズモのドラッグは、離した時点で自動的に確定する。**
+`TransformControls` の `dragging-changed` イベントは元々 OrbitControls を
+止める/戻すためだけに使っていたが、`e.value === false`(ドラッグ終了)かつ
+`gizmoKind === 'part'` のときに `applyPartMoveFromFields()`(=
+`moveSelectedPart()` を `part-x/y/z` の現在値で呼ぶ)も呼ぶようにした。
+これにより「ドラッグ→ボタンを押して確定」の 2 手順が「ドラッグして離す」
+の 1 手順になり、確定は他の編集操作と同じ `commitGeometry()` → `pushHistory()`
+を通るので Ctrl+Z / Ctrl+Y(↶/↷ ボタン)でそのまま undo/redo できる。
+`moveSelectedPart()` 側に既にある「移動量が全軸 0 なら何もしない」ガードが、
+クリックだけ(ドラッグなし)で `dragging-changed` が発火した場合の空コミットを
+防いでいる。数値入力欄を直接編集した場合の確定手段として「移動を適用」
+ボタン(同じ `applyPartMoveFromFields()` を呼ぶ)は残す。
+図形/テキストのプレビュー(`gizmoKind === 'shape'/'text'`)はドラッグ終了で
+自動確定しない。結合方法(`union`/`subtract`)をユーザーが選ぶ必要がある
+CSG 操作であり、ドラッグだけでは確定先を決められないため。
+
 ## 3MF 読み込み
 - `ThreeMFLoader.parse(buffer)` はシーンに追加していない `THREE.Group` を同期的に返す。
 - `group.updateMatrixWorld(true)` を呼んでから各 `Mesh` を走査し、`position` 属性(と
