@@ -217,6 +217,12 @@ const JA = {
   'set.apiKey': 'Gemini API キー',
   'set.apiKeyNote': 'ブラウザの localStorage にのみ保存されます(サーバ送信なし)。',
   'set.model': 'モデル',
+  'set.modelAuto': '自動(最新の flash)',
+  'set.modelRefreshTitle': 'モデル一覧を再取得',
+  'set.modelNeedsKey': 'API キーを入力すると一覧を取得します。',
+  'set.modelRefreshing': 'モデル一覧を取得中…',
+  'set.modelRefreshOk': '{count} 件のモデルを取得しました。',
+  'set.modelRefreshFail': 'モデル一覧の取得に失敗しました: {detail}',
   'set.sysPrompt': 'システムプロンプト(編集可)',
   'set.resetPrompt': '既定に戻す',
 
@@ -297,6 +303,8 @@ const JA = {
   'err.geminiApi': 'Gemini API エラー {status}\n{detail}',
   'err.geminiEmpty': 'Gemini から空の応答が返りました。',
   'err.geminiTitle': 'Gemini 連携エラー',
+  'err.modelListApi': 'モデル一覧の取得エラー {status}\n{detail}',
+  'err.modelListEmpty': '利用できる Gemini モデルが見つかりませんでした。',
 
   // ── システムメッセージ ──
   'msg.loaded': '{fmt} を読み込みました: {name}',
@@ -522,6 +530,12 @@ const EN = {
   'set.apiKey': 'Gemini API key',
   'set.apiKeyNote': 'Stored only in your browser’s localStorage (never sent to our servers).',
   'set.model': 'Model',
+  'set.modelAuto': 'Auto (latest flash)',
+  'set.modelRefreshTitle': 'Refresh the model list',
+  'set.modelNeedsKey': 'Enter an API key to fetch the model list.',
+  'set.modelRefreshing': 'Fetching model list…',
+  'set.modelRefreshOk': 'Fetched {count} models.',
+  'set.modelRefreshFail': 'Failed to fetch the model list: {detail}',
   'set.sysPrompt': 'System prompt (editable)',
   'set.resetPrompt': 'Restore default',
 
@@ -602,6 +616,8 @@ const EN = {
   'err.geminiApi': 'Gemini API error {status}\n{detail}',
   'err.geminiEmpty': 'Gemini returned an empty response.',
   'err.geminiTitle': 'Gemini request failed',
+  'err.modelListApi': 'Model list error {status}\n{detail}',
+  'err.modelListEmpty': 'No available Gemini models were found.',
 
   // ── System messages ──
   'msg.loaded': 'Loaded {fmt}: {name}',

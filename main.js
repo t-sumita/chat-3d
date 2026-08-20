@@ -35,6 +35,9 @@ const ON_EDGE_EPS = 1e-4;                      // 水密化: 頂点が辺の上�
 const WELD_CELL = 0.5;                         // 水密化: 近傍頂点を引く空間ハッシュのセルサイズ(mm)
 const TEXT_FONT_URL =                          // テキスト生成用フォント(半角英数のみ)
   'https://unpkg.com/three@0.160.0/examples/fonts/helvetiker_regular.typeface.json';
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+// モデル名を固定文字列で持たない(Google 側の個別モデル廃止で不意に 404 になるため)。
+// 実在するモデルは ListModels エンドポイントから毎回解決する。詳細は resolveGeminiModel() 参照。
 
 // LLM にコードを書かせるためのシステムプロンプト・テンプレート。
 // 開発者が後から調整しやすいよう、ここに定数として明示的に定義する
@@ -1965,14 +1968,80 @@ function buildSystemPrompt() {
   return tmpl.replace('{{CONTEXT}}', buildContext());
 }
 
+// モデル一覧を「自動」で解決した結果のキャッシュ。設定には保存しない
+// (保存すると、その ID がいずれ廃止されたときに今回と同じ問題を繰り返すため)。
+let cachedAutoModel = null;
+
+const MODEL_EXCLUDE_RE = /tts|image|audio|live|embedding|vision/i;   // テキスト生成に使わない系統
+
+/**
+ * Gemini の ListModels API からモデル一覧を取得する。
+ * モデル名を固定文字列で持たず、実在するものだけを使うための情報源にする。
+ * @param {string} apiKey Gemini API キー
+ * @returns {Promise<Array<{id: string, methods: string[]}>>}
+ */
+async function listGeminiModels(apiKey) {
+  const url = `${GEMINI_API_BASE}/models?pageSize=1000&key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(t('err.modelListApi', { status: res.status, detail }));
+  }
+  const data = await res.json();
+  return (data?.models || [])
+    .map((m) => ({
+      id: String(m.name || '').replace(/^models\//, ''),
+      methods: m.supportedGenerationMethods || [],
+    }))
+    .filter((m) => m.id);
+}
+
+/**
+ * モデル一覧から、文章生成に使える「最新の flash」を選ぶ。
+ * バージョン番号(major.minor)が大きい順、同点なら preview/exp/lite でない
+ * 安定版を優先する。
+ * @param {Array<{id: string, methods: string[]}>} models listGeminiModels() の戻り値
+ * @returns {string|null} 選んだモデル ID(候補が無ければ null)
+ */
+function pickLatestFlashModel(models) {
+  const candidates = models
+    .filter((m) => m.methods.includes('generateContent'))
+    .filter((m) => /flash/i.test(m.id) && !MODEL_EXCLUDE_RE.test(m.id))
+    .map((m) => {
+      const v = m.id.match(/^gemini-(\d+)(?:\.(\d+))?-flash/i);
+      if (!v) return null;
+      const stability = (/preview|exp|thinking/i.test(m.id) ? -2 : 0) + (/-lite/i.test(m.id) ? -1 : 0);
+      return { id: m.id, major: Number(v[1]), minor: v[2] ? Number(v[2]) : 0, stability };
+    })
+    .filter(Boolean);
+
+  candidates.sort((a, b) =>
+    b.major - a.major || b.minor - a.minor || b.stability - a.stability || a.id.length - b.id.length);
+  return candidates[0]?.id || null;
+}
+
+/**
+ * 実際に呼び出すモデル ID を決める。設定で明示的に選ばれていればそれを尊重し、
+ * 「自動」(未選択)なら ListModels から最新の flash を解決してキャッシュする。
+ * @param {string} apiKey Gemini API キー
+ * @returns {Promise<string>} モデル ID
+ */
+async function resolveGeminiModel(apiKey) {
+  if (settings.model) return settings.model;
+  if (!cachedAutoModel) {
+    cachedAutoModel = pickLatestFlashModel(await listGeminiModels(apiKey));
+    if (!cachedAutoModel) throw new Error(t('err.modelListEmpty'));
+  }
+  return cachedAutoModel;
+}
+
 /** Gemini REST API を呼んで応答テキストを返す */
 async function callGemini(userText) {
   const key = settings.apiKey;
-  const model = settings.model || 'gemini-2.5-flash';
   if (!key) throw new Error(t('err.apiKeyMissing'));
+  const model = await resolveGeminiModel(key);
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/` +
-    `${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+  const url = `${GEMINI_API_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
 
   const body = {
     systemInstruction: { parts: [{ text: buildSystemPrompt() }] },
@@ -2264,7 +2333,7 @@ async function handlePasteRun() {
 
 function loadSettings() {
   const defaults = {
-    apiKey: '', model: 'gemini-2.5-flash',
+    apiKey: '', model: '',
     systemPrompt: defaultSystemPrompt(), execHistory: [],
     promptVersion: PROMPT_VERSION, promptEdited: false,
   };
@@ -2273,6 +2342,11 @@ function loadSettings() {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) s = Object.assign({}, defaults, JSON.parse(raw));
   } catch (_) { /* 破損時は既定値 */ }
+
+  // model は空文字列 = 「自動」(ListModels から毎回解決、保存しない)。
+  // 個別モデル名やエイリアスは Google 側の廃止で不意に壊れるため、固定文字列は
+  // 一切保存しない。過去バージョンで保存された値は既定の「自動」へ戻す。
+  if (s.model === 'gemini-2.5-flash' || s.model === 'gemini-flash-latest') s.model = '';
 
   // 保存済みプロンプトをユーザーが編集していなければ、既定の更新に追従させる。
   // これが無いと、一度でも設定を保存した環境に新しい既定プロンプトが届かない。
@@ -2287,6 +2361,69 @@ function saveSettings() {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(settings));
   } catch (_) { /* 容量超過等は黙って無視 */ }
+}
+
+// モデル一覧欄(#model-status)の直近の状態。言語切替時に文言を作り直すために覚えておく。
+let modelStatusState = { kind: 'idle' };
+
+/** #model-status を modelStatusState に沿って現在の言語で描き直す */
+function renderModelStatus() {
+  const el = document.getElementById('model-status');
+  if (!el) return;
+  const s = modelStatusState;
+  el.textContent =
+    s.kind === 'needsKey' ? t('set.modelNeedsKey') :
+    s.kind === 'loading' ? t('set.modelRefreshing') :
+    s.kind === 'ok' ? t('set.modelRefreshOk', { count: s.count }) :
+    s.kind === 'error' ? t('set.modelRefreshFail', { detail: s.detail }) : '';
+}
+
+/**
+ * Gemini API キーを使ってモデル一覧を取得し、#api-model の選択肢を作り直す。
+ * 「自動」は常に先頭に残す。保存済みの選択が一覧から消えていた場合(廃止等)は
+ * 「自動」へ戻す(固定文字列を持ち続けないため)。
+ */
+async function refreshModelOptions() {
+  const select = document.getElementById('api-model');
+  if (!select) return;
+  select.innerHTML = '';
+  const autoOpt = document.createElement('option');
+  autoOpt.value = '';
+  autoOpt.textContent = t('set.modelAuto');
+  select.appendChild(autoOpt);
+
+  const key = settings.apiKey;
+  if (!key) {
+    select.value = '';
+    modelStatusState = { kind: 'needsKey' };
+    renderModelStatus();
+    return;
+  }
+  modelStatusState = { kind: 'loading' };
+  renderModelStatus();
+  try {
+    const models = await listGeminiModels(key);
+    const ids = models
+      .filter((m) => m.methods.includes('generateContent'))
+      .map((m) => m.id)
+      .sort();
+    for (const id of ids) {
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = id;
+      select.appendChild(opt);
+    }
+    if (settings.model && !ids.includes(settings.model)) {
+      settings.model = '';
+      saveSettings();
+    }
+    select.value = settings.model || '';
+    modelStatusState = { kind: 'ok', count: ids.length };
+  } catch (err) {
+    select.value = settings.model || '';
+    modelStatusState = { kind: 'error', detail: err.message };
+  }
+  renderModelStatus();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -2401,13 +2538,23 @@ function initUI() {
   // 設定タブ
   const apiKey = document.getElementById('api-key');
   const apiModel = document.getElementById('api-model');
+  const modelRefreshBtn = document.getElementById('btn-model-refresh');
   const sysPrompt = document.getElementById('sys-prompt');
   apiKey.value = settings.apiKey || '';
-  apiModel.value = settings.model || 'gemini-2.5-flash';
   sysPrompt.value = settings.systemPrompt || defaultSystemPrompt();
+  refreshModelOptions();
 
-  apiKey.addEventListener('change', () => { settings.apiKey = apiKey.value.trim(); saveSettings(); });
+  apiKey.addEventListener('change', () => {
+    settings.apiKey = apiKey.value.trim();
+    saveSettings();
+    cachedAutoModel = null; // キーが変われば自動解決のキャッシュも作り直す
+    refreshModelOptions();
+  });
   apiModel.addEventListener('change', () => { settings.model = apiModel.value; saveSettings(); });
+  modelRefreshBtn.addEventListener('click', () => {
+    cachedAutoModel = null;
+    refreshModelOptions();
+  });
   sysPrompt.addEventListener('change', () => {
     settings.systemPrompt = sysPrompt.value;
     // 手で編集した以降は、既定プロンプトの更新で上書きしない
@@ -2446,6 +2593,9 @@ function relocalize(sysPrompt, codeInput) {
   setChatMode(chatMode, false);
   initHintLibrary();
   if (parts.length) renderPartsList(false);
+  const autoOpt = document.getElementById('api-model')?.querySelector('option[value=""]');
+  if (autoOpt) autoOpt.textContent = t('set.modelAuto');
+  renderModelStatus();
 
   // 未編集のサンプル/既定プロンプトだけ差し替える(手を入れた内容は消さない)
   if (isSampleCode(codeInput.value)) codeInput.value = sampleCode();

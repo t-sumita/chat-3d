@@ -616,6 +616,10 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 .field small { color: var(--muted); font-size: 11px; }
 .field summary { cursor: pointer; margin-bottom: 8px; }
 
+.model-row { display: flex; gap: 6px; align-items: center; }
+.model-row select { flex: 1 1 auto; min-width: 0; }
+.model-row .btn { flex: 0 0 auto; }
+
 /* ── エラーボックス ── */
 #error-box {
   border-top: 1px solid var(--danger);

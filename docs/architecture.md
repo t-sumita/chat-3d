@@ -313,7 +313,24 @@ LLM は形を見ていないため、位置は座標(mm)でしか伝えられな
 - エンドポイント: `POST /v1beta/models/{model}:generateContent?key=...`
 - `systemInstruction` に system プロンプト、`contents` にユーザー指示を入れる。
 - 応答 `candidates[0].content.parts[].text` を結合し、コード抽出 → 実行。
-- API キー・モデル・system プロンプトは localStorage（`chat3d.settings.v1`）に保存。
+- API キー・system プロンプトは localStorage（`chat3d.settings.v1`）に保存。
+
+### モデル名は固定文字列で持たない(v0.12.0)
+Google は個別のモデル ID(`gemini-2.5-flash` 等)を新規ユーザー向けに随時廃止しており、
+固定文字列やエイリアス(`gemini-flash-latest` 等)をコードに埋め込んでも、いずれ同じ
+404 で壊れる。そのため実在するモデルは `GET /v1beta/models?key=...`
+(`listGeminiModels()`)から毎回取得し、次のルールで解決する。
+- `settings.model` が空文字列(既定・「自動」)なら、一覧から `generateContent` 対応 かつ
+  `flash` 系(TTS/画像/音声/ライブ/embedding/vision 系は除外)のうち、バージョン番号が
+  最大のものを `pickLatestFlashModel()` で選ぶ(`preview`/`exp`/`thinking`/`-lite` は
+  同点なら劣後させる)。結果はページ読み込み中だけ `cachedAutoModel` に保持し、
+  **localStorage には保存しない**(保存すると解決結果自体が新たな固定文字列になり、
+  廃止されたときに今回と同じ問題を繰り返すため)。
+- 設定タブの「モデル」欄でユーザーが具体的なモデルを選んだ場合のみ `settings.model` に
+  保存する(明示的な選択は尊重してよい意図的な上書きのため)。この一覧も
+  `listGeminiModels()` の結果で動的に作る(`refreshModelOptions()`、API キー入力時と
+  更新ボタンで再取得)。保存済みの選択が一覧から消えていたら(廃止された等)自動で
+  「自動」へ戻す。
 
 ## 多言語化(`i18n.js`、v0.10.0)
 

@@ -320,11 +320,14 @@
         </label>
         <label class="field">
           <span data-i18n="set.model">モデル</span>
-          <select id="api-model">
-            <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
-            <option value="gemini-flash-latest">gemini-flash-latest</option>
-          </select>
+          <div class="model-row">
+            <select id="api-model">
+              <option value="" data-i18n="set.modelAuto">自動(最新の flash)</option>
+            </select>
+            <button id="btn-model-refresh" class="btn btn-ghost btn-icon" type="button"
+              data-i18n-title="set.modelRefreshTitle">⟳</button>
+          </div>
+          <small id="model-status"></small>
         </label>
         <details class="field">
           <summary data-i18n="set.sysPrompt">システムプロンプト(編集可)</summary>
@@ -364,7 +367,7 @@
       sitesJsonPath: 'config/subutomo-sites.json',
       logoPath: './common/assets/logo.png',
       theme: 'dark-bg',
-      version: '0.11.1',
+      version: '0.12.0',
       privacy: { localStorage: true, analytics: false },
       onSecretAction: null
     };
