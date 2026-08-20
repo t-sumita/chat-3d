@@ -62,6 +62,7 @@ const JA = {
     '続けて「…直径 8mm・深さ 5mm の穴をあけて」のように書き足してください。',
 
   // ── 使い方ガイド(guide.html)への導線 ──
+  'guide.btnLabel': '📖 ガイド',
   'guide.btnTitle': '使い方ガイドを新しいタブで開く',
 
   // ── 使い方ガイドページ(guide.html)本文 ──
@@ -69,6 +70,7 @@ const JA = {
   'gp.docDesc': 'Chat 3D の目的・CSG の説明・座標の読み方・立体テキストの追加方法・STL 保存時の水密化についてのガイドです。',
   'gp.back': '← Chat 3D に戻る',
   'gp.h1': '使い方ガイド',
+  'gp.tocTitle': '目次',
   'gp.body': `
     <p>ブラウザだけで完結する、テキスト指示 / コード実行による 3D モデル(STL)生成・編集ツールの PoC です。バックエンドは持ちません。</p>
     <ul>
@@ -78,7 +80,7 @@ const JA = {
       <li><b>コード直接入力</b> — 外部 LLM で作った JavaScript を貼り付けて実行。</li>
     </ul>
 
-    <p class="gp-h">CSG とは?</p>
+    <h2 class="gp-h" id="sec-csg">CSG とは?</h2>
     <p>立体どうしを<b>「足す・引く・重なりを取る」</b>演算のことです。たとえば立方体から円柱を「引く」と、そこに穴が開きます。3D プリンタ用のモデルを組み立てるときの、いちばん基本になる操作です。</p>
     <ul>
       <li><b>結合(union)</b> — 2 つの立体をくっつけて 1 つにする。</li>
@@ -86,12 +88,12 @@ const JA = {
       <li><b>交差(intersect)</b> — 重なっている部分だけを残す。</li>
     </ul>
 
-    <p class="gp-h">単位と座標</p>
+    <h2 class="gp-h" id="sec-coords">単位と座標</h2>
     <p>数値は <b>mm</b> として扱います(40 と書けば 40mm)。読み込んだモデルは<b>原点が中心</b>になるよう自動で移動されるので、「中心から 20mm 右」のように指示できます。</p>
     <p>床のグリッドは <b>1 マス 10mm</b>、原点から伸びる 3 本の線が座標軸です(<b><span class="ax-x">X</span> = 左右</b> ／ <b><span class="ax-y">Y</span> = 高さ</b> ／ <b><span class="ax-z">Z</span> = 奥行き</b>)。3D ビュー右下のボタンで表示を消せます。</p>
     <p><b>指示に書く座標が分からないときは、モデルを Shift + クリック</b>してください。その点の座標が吹き出しに出て、そのままチャットの入力欄へ挿入できます。LLM は形を見ていないので、位置はこの座標で伝えるのが確実です。消しゴムを ON にしたままでも使えます(Shift を押している間だけ座標の読み取りになります)。</p>
 
-    <p class="gp-h">立体文字を入れる(浮き彫り・彫り込み)</p>
+    <h2 class="gp-h" id="sec-text">立体文字を入れる(浮き彫り・彫り込み)</h2>
     <p>チャットの指示に文字の内容を書くだけで、立体的な文字を追加できます。特別なボタンや操作は不要です。</p>
     <ul>
       <li>例:「上面に "A1" という文字を、高さ 8mm・厚み 1mm で浮き彫りにして」</li>
@@ -100,7 +102,7 @@ const JA = {
       <li>チャットを使わない「編集」タブにも文字追加はありますが、そちらは中央配置・Y 位置のみの簡易版です。X/Z 位置や向きまで指定したいときはチャット指示を使ってください。</li>
     </ul>
 
-    <p class="gp-h">保存した STL はそのまま印刷できます</p>
+    <h2 class="gp-h" id="sec-watertight">保存した STL はそのまま印刷できます</h2>
     <p>「STL 保存」を押すと、書き出しの直前に<b>自動で水密化(修復)</b>を行います。CSG は原理上、つながっていない面(T ジャンクション)と厚みゼロの内部の壁を作ってしまい、そのまま出すとスライサーで「面が欠けている」「非多様体エッジ」と言われます。それを保存のたびに 1 回だけ直しています。</p>
     <p><b>形は 1 ミクロンも変わりません。</b>頂点は 1 つも動かさず、既存の辺の上にだけ角を足し、体積ゼロの面だけを取り除いているためです。</p>
     <ul>
@@ -109,14 +111,14 @@ const JA = {
       <li>保存時に「🩹 面の欠けを修復しました」と出れば成功です。</li>
     </ul>
 
-    <p class="gp-h">「三角形が多すぎる」と言われたら</p>
+    <h2 class="gp-h" id="sec-tricount">「三角形が多すぎる」と言われたら</h2>
     <p>CSG(穴あけ・結合など)を重ねると、見た目は変わらなくても<b>三角形の数だけが増えていきます</b>。スライサーで警告が出ることがありますが、<b>そのままスライスできるなら何もしないのが一番安全です</b>。</p>
     <ul>
       <li>⚠ <b>「簡略化(Simplify)」は使わないでください。</b>単純に間引く処理は閉じた立体(水密)としての整合性まで見てくれないため、モデルに穴が開いて壊れることがあります。</li>
       <li>どうしても減らしたい場合は、chat-3d 側で分割数を抑えて作り直すほうが確実です(丸みより面取り、円筒の分割は 12〜16 など)。</li>
     </ul>
 
-    <p class="gp-h">それでも修復を促されたら</p>
+    <h2 class="gp-h" id="sec-repair">それでも修復を促されたら</h2>
     <p>他のツールや、古いバージョンで保存した STL で修復が必要になったときの注意です。</p>
     <ul>
       <li>⚠ <b>修復は「意図して作った部分」まで消すことがあります。</b>細い突起・薄い板・小さな穴などは、修復する側から見ると「壊れた部分」と区別がつきません。</li>
@@ -395,6 +397,7 @@ const EN = {
     '“…drill an 8 mm hole, 5 mm deep”.',
 
   // ── Link to the usage guide (guide.html) ──
+  'guide.btnLabel': '📖 Guide',
   'guide.btnTitle': 'Open the usage guide in a new tab',
 
   // ── Usage guide page (guide.html) body ──
@@ -402,6 +405,7 @@ const EN = {
   'gp.docDesc': 'A guide to Chat 3D: what it is for, what CSG means, how coordinates work, how to add 3D text, and watertighting on STL export.',
   'gp.back': '← Back to Chat 3D',
   'gp.h1': 'Usage guide',
+  'gp.tocTitle': 'Contents',
   'gp.body': `
     <p>A browser-only proof of concept for generating and editing 3D models (STL) from text instructions or executable code. There is no backend.</p>
     <ul>
@@ -411,7 +415,7 @@ const EN = {
       <li><b>Paste code</b> — run JavaScript you produced with any external LLM.</li>
     </ul>
 
-    <p class="gp-h">What is CSG?</p>
+    <h2 class="gp-h" id="sec-csg">What is CSG?</h2>
     <p>CSG means <b>adding, subtracting and intersecting</b> solids. Subtract a cylinder from a cube and you get a hole. It is the most basic operation for assembling a printable model.</p>
     <ul>
       <li><b>union</b> — fuse two solids into one.</li>
@@ -419,12 +423,12 @@ const EN = {
       <li><b>intersect</b> — keep only the overlapping region.</li>
     </ul>
 
-    <p class="gp-h">Units and coordinates</p>
+    <h2 class="gp-h" id="sec-coords">Units and coordinates</h2>
     <p>Numbers are <b>millimetres</b> (write 40 and you get 40&nbsp;mm). A loaded model is automatically moved so that <b>the origin is at its centre</b>, so you can say things like “20&nbsp;mm to the right of the centre”.</p>
     <p>One square of the floor grid is <b>10&nbsp;mm</b>, and the three lines through the origin are the axes (<b><span class="ax-x">X</span> = left–right</b> · <b><span class="ax-y">Y</span> = height</b> · <b><span class="ax-z">Z</span> = depth</b>). The button at the bottom right of the 3D view hides them.</p>
     <p><b>If you do not know which coordinates to write, Shift + click the model.</b> A callout shows the coordinates of that point and can insert them into the chat box. The LLM cannot see the shape, so coordinates are the reliable way to say where something goes. This works even while the eraser is ON — holding Shift switches that click to reading coordinates.</p>
 
-    <p class="gp-h">Adding 3D text (emboss or engrave)</p>
+    <h2 class="gp-h" id="sec-text">Adding 3D text (emboss or engrave)</h2>
     <p>Just describe the text in your chat instruction — no special button or step is needed.</p>
     <ul>
       <li>Example: “Emboss the text ‘A1’ on the top face, 8&nbsp;mm tall and 1&nbsp;mm deep.”</li>
@@ -433,7 +437,7 @@ const EN = {
       <li>The chat-free “Edit” tab can also add text, but only centred with a Y position. Use a chat instruction if you need X/Z position or rotation.</li>
     </ul>
 
-    <p class="gp-h">Saved STL files are ready to print</p>
+    <h2 class="gp-h" id="sec-watertight">Saved STL files are ready to print</h2>
     <p>When you press “Save STL”, the mesh is <b>made watertight automatically</b> just before export. By design, CSG leaves faces that do not share their corners (T-junctions) and zero-thickness internal walls; exported as-is, a slicer reports “missing faces” and “non-manifold edges”. That is repaired once, on every save.</p>
     <p><b>The shape does not change by even a micron.</b> No vertex is moved — corners are only added along edges that already exist, and only faces with zero volume are removed.</p>
     <ul>
@@ -442,14 +446,14 @@ const EN = {
       <li>If the toast says “🩹 Repaired missing faces” after saving, it worked.</li>
     </ul>
 
-    <p class="gp-h">If your slicer says “too many triangles”</p>
+    <h2 class="gp-h" id="sec-tricount">If your slicer says “too many triangles”</h2>
     <p>Every CSG operation (holes, merges, …) increases <b>the triangle count</b> even when the shape looks the same, so a slicer may warn you. <b>If it still slices, the safest action is to do nothing.</b></p>
     <ul>
       <li>⚠ <b>Do not use “Simplify”.</b> Naive decimation ignores watertightness, so it can punch holes in the model and break it.</li>
       <li>If you really must reduce the count, rebuild it here with fewer segments instead (prefer chamfers over fillets, 12–16 segments for cylinders, and so on).</li>
     </ul>
 
-    <p class="gp-h">If something still asks you to repair</p>
+    <h2 class="gp-h" id="sec-repair">If something still asks you to repair</h2>
     <p>Notes for other tools, or for STL files saved with an older version.</p>
     <ul>
       <li>⚠ <b>Repair can delete parts you meant to keep.</b> Thin pins, thin plates and small holes look exactly like damage to a repair algorithm.</li>

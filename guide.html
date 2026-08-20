@@ -1,7 +1,7 @@
 <!-- 使い方ガイド(index.html とは別の独立ページ)。info パネルの情報量が増えたため分離した。 -->
 <!-- 表示文言は data-i18n 属性でマークし、i18n.js が日本語/英語を流し込む(index.html と同じ仕組み)。 -->
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="ja" class="gp-page">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -21,6 +21,7 @@
         data-i18n="lang.label" data-i18n-title="lang.title">EN</button>
     </div>
     <h1 data-i18n="gp.h1">使い方ガイド</h1>
+    <nav id="gp-toc" class="gp-toc" aria-label="Table of contents"></nav>
     <div class="gp-article" data-i18n-html="gp.body"></div>
   </div>
 
@@ -43,7 +44,7 @@
       sitesJsonPath: 'config/subutomo-sites.json',
       logoPath: './common/assets/logo.png',
       theme: 'dark-bg',
-      version: '0.14.0',
+      version: '0.15.0',
       privacy: { localStorage: true, analytics: false },
       onSecretAction: null
     };

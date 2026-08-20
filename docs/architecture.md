@@ -397,21 +397,42 @@ Google は個別のモデル ID(`gemini-2.5-flash` 等)を新規ユーザー向�
 ドロップダウン)だった。CSG・座標・水密化・三角形数対策・立体テキストなど内容が
 増え続け、小さなパネルに収まらなくなったため、別ページ `guide.html` に切り出した。
 
-- ボタンは `#btn-guide`(`.guide-btn`、「?」)。トグルではなく `<a href="guide.html"
+- ボタンは `#btn-guide`(`.guide-btn`)。トグルではなく `<a href="guide.html"
   target="_blank">` の**ただのリンク**なので、開閉状態を管理する JS が不要になった
   (以前の `setInfoOpen()` / クリック外側判定は削除済み)。
 - `guide.html` は `main.js`(Three.js / CSG / 動的実行エンジン)を読み込まない。
   作業中のシーンとは無関係な静的ページのため、3D 関連の依存を持ち込む理由がない。
   文言の適用と言語切替だけを行う `guide-init.js` を読む。
 - `style.css` を共有する。ただし `html, body { overflow: hidden; height: 100% }` は
-  `#app` の固定ビューポート前提の指定なので、`guide.html` 側は `body.gp-page` で
-  上書きして通常の縦スクロール記事にしている。
+  `#app` の固定ビューポート前提の指定なので、`guide.html` 側は `html.gp-page` /
+  `body.gp-page` の両方で上書きして通常の縦スクロール記事にしている。**`body` だけ
+  上書きしても親の `html` が `overflow: hidden` のままだとスクロールバーは出ない**
+  (v0.15.0 で実際に発生・修正)。
 - 見出し・注記のクラス名は `.info-h` / `.info-note`(info パネル時代の名残)から
   `.gp-h` / `.gp-note` に変更した。
 - 本文は 1 つの `data-i18n-html` キー(`gp.body`)にまとめている(info パネル時代と
-  同じ構成)。セクションを増やすときは `<p class="gp-h">見出し</p>` を追加するだけでよい。
+  同じ構成)。セクションは `<h2 class="gp-h" id="sec-xxx">見出し</h2>`(v0.15.0 で
+  `<p>` から `<h2 id>` に変更。目次のアンカー先と `scroll-margin-top` のため)。
+  `id` は ja/en で同じ文字列にする(表示言語に関わらずアンカーが機能するように)。
 - 共有フッター/バッジ/favicon は `index.html` と同様に持たせる(CLAUDE.md の方針どおり、
   単独ページでも Subutomo サイト群の一員として振る舞う)。
+
+### 目次(#gp-toc、v0.15.0)
+本文の見出しが増えて読みにくいとの指摘を受け、`<nav id="gp-toc">` を追加した。
+- セクション見出しを目次専用の i18n キーとして**二重管理しない**方針。
+  `guide-init.js` の `buildToc()` が `.gp-article h2[id]` を都度クエリして
+  `<a href="#id">見出しテキスト</a>` を生成する(見出し文言は `gp.body` 側の
+  訳文をそのまま読み取るので、目次だけ翻訳が古くなることがない)。
+- `applyStaticI18n()` 直後と `onLangChange()` の両方で呼ぶ(言語切替で `gp.body` の
+  `innerHTML` が丸ごと差し替わり、見出し文言も変わるため)。
+
+### ガイドボタンの視認性(v0.15.0)
+旧「?」だけの丸ボタンは、3D ビューポート上で目立たず気付かれにくいという指摘を
+受けた。プロジェクトで既に使っている絵文字+ラベルのボタン慣習(`📋 コピペモード` /
+`🔌 API モード` 等)に合わせ、`📖 ガイド` / `📖 Guide` に変更し、枠線もホバー時だけ
+でなく常時アクセントカラーにした。あわせて `.guide-btn` と `.lang-btn` を
+`.viewport-topright`(flex コンテナ)にまとめた。以前はそれぞれ `right: 12px` /
+`right: 44px` を個別のハードコードで持っており、ボタン幅が変わると重なる作りだった。
 
 ## Subutomo 共有 UI
 - 左下バッジ: `assets/subutomo-badge.js` + `SUBUTOMO_BADGE_CONFIG`（spctrl-site と同一挙動）。

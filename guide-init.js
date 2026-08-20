@@ -14,9 +14,28 @@ function applyGuideTitle() {
   if (desc) desc.content = t('gp.docDesc');
 }
 
+/**
+ * 本文(.gp-article)内の見出し(h2.gp-h[id])から目次を組み立てる。
+ * 見出しの文言を目次専用の i18n キーとして二重管理しないための措置
+ * (本文側の h2 テキストをそのまま読み取って link を作る)。
+ */
+function buildToc() {
+  const nav = document.getElementById('gp-toc');
+  if (!nav) return;
+  const headings = document.querySelectorAll('.gp-article h2[id]');
+  const links = Array.from(headings)
+    .map((h) => `<a href="#${h.id}">${h.textContent}</a>`)
+    .join('');
+  nav.innerHTML = `<strong class="gp-toc-title">${t('gp.tocTitle')}</strong>${links}`;
+}
+
 applyStaticI18n();
 applyGuideTitle();
-onLangChange(applyGuideTitle);
+buildToc();
+onLangChange(() => {
+  applyGuideTitle();
+  buildToc();
+});
 
 document.getElementById('btn-lang').addEventListener('click', () => {
   setLang(getLang() === 'ja' ? 'en' : 'ja');

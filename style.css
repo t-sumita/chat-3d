@@ -182,35 +182,38 @@ html, body {
   color: var(--muted);
 }
 
-/* 右上: 使い方ガイド(別ページ)への導線ボタン */
-.guide-btn {
+/* 右上: 使い方ガイド(別ページ)へのリンクと言語切替をまとめて配置する。
+   個別に position:absolute; right:Npx を持たせると、文言(言語)でボタン幅が
+   変わったときに重なるため、コンテナ側の flex に幅計算を任せる。 */
+.viewport-topright {
   position: absolute;
   top: 12px;
   right: 12px;
   z-index: 5;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.5);
-  color: var(--accent);
-  font-weight: 700;
-  font-size: 13px;
-  cursor: pointer;
-  text-decoration: none;
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
+}
+.guide-btn {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 13px;
+  border: 1px solid var(--accent);
+  background: rgba(0, 0, 0, 0.5);
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
   transition: background 0.15s, border-color 0.15s;
 }
-.guide-btn:hover { border-color: var(--accent); background: rgba(0, 0, 0, 0.7); }
+.guide-btn:hover { background: rgba(0, 0, 0, 0.7); }
 
-/* 右上: 表示言語の切替(ガイドボタンの左隣に置く) */
 .lang-btn {
-  position: absolute;
-  top: 12px;
-  right: 44px;
-  z-index: 5;
   height: 26px;
   padding: 0 9px;
   border-radius: 13px;
@@ -227,19 +230,50 @@ html, body {
 
 /* ── 使い方ガイドページ(guide.html)専用 ──
    #app の固定ビューポート前提(html/body: overflow hidden)を外し、
-   通常の縦スクロール記事として表示する。 */
-body.gp-page { overflow-y: auto; height: auto; min-height: 100%; }
+   通常の縦スクロール記事として表示する。html 側にも掛けないと、
+   body だけ auto にしても親の html が hidden のままでスクロールバーが出ない。 */
+html.gp-page, body.gp-page { overflow-y: auto; height: auto; min-height: 100%; }
 .gp-wrap { max-width: 720px; margin: 0 auto; padding: 28px 20px 60px; }
 .gp-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
-.gp-header .lang-btn { position: static; }
 #gp-back { display: inline-block; text-decoration: none; }
-.gp-wrap h1 { font-size: 20px; margin: 0 0 18px; }
+.gp-wrap h1 { font-size: 22px; margin: 0 0 14px; }
+
+/* 目次。guide-init.js が本文の見出し(h2.gp-h[id])から自動生成する */
+.gp-toc {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 16px;
+  margin: 0 0 24px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-bg);
+  font-size: 12.5px;
+}
+.gp-toc-title {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+.gp-toc a { color: var(--accent); text-decoration: none; }
+.gp-toc a:hover { text-decoration: underline; }
+
 .gp-article { font-size: 13.5px; line-height: 1.75; color: var(--text); }
 .gp-article p { margin: 0 0 10px; }
 .gp-article ul { margin: 0 0 10px; padding-left: 20px; }
 .gp-article li { margin-bottom: 5px; }
 .gp-article code { font-family: var(--mono); font-size: 12px; color: var(--accent); }
-.gp-h { font-weight: 700; color: var(--accent); font-size: 15px; margin: 22px 0 7px !important; }
+.gp-h {
+  font-weight: 700;
+  color: var(--accent);
+  font-size: 16px;
+  margin: 26px 0 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  scroll-margin-top: 14px;
+}
 .gp-note { color: #ffd39b; font-size: 12px; }
 
 /* ── 右下: 表示補助(グリッド/軸)と座標ピック ──

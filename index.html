@@ -96,11 +96,13 @@
         </div>
       </div>
 
-      <!-- 右上: 言語切替と、使い方ガイド(別ページ)へのリンク -->
-      <button id="btn-lang" class="lang-btn" type="button"
-        data-i18n="lang.label" data-i18n-title="lang.title">EN</button>
-      <a id="btn-guide" class="guide-btn" href="guide.html" target="_blank" rel="noopener noreferrer"
-        data-i18n-title="guide.btnTitle" aria-label="Chat 3D guide">?</a>
+      <!-- 右上: 使い方ガイド(別ページ)へのリンクと言語切替 -->
+      <div class="viewport-topright">
+        <a id="btn-guide" class="guide-btn" href="guide.html" target="_blank" rel="noopener noreferrer"
+          data-i18n="guide.btnLabel" data-i18n-title="guide.btnTitle">📖 ガイド</a>
+        <button id="btn-lang" class="lang-btn" type="button"
+          data-i18n="lang.label" data-i18n-title="lang.title">EN</button>
+      </div>
     </section>
 
     <!-- 右: 操作パネル -->
@@ -360,7 +362,7 @@
       sitesJsonPath: 'config/subutomo-sites.json',
       logoPath: './common/assets/logo.png',
       theme: 'dark-bg',
-      version: '0.14.0',
+      version: '0.15.0',
       privacy: { localStorage: true, analytics: false },
       onSecretAction: null
     };
