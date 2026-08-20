@@ -700,6 +700,9 @@ function applyHistoryAt(index) {
     setTargetMesh(new THREE.Mesh(snap.clone(), defaultMaterial()), false);
   }
   clearParts();
+  // 結合前の図形/テキストのプレビューはモデルとは独立した状態のため、
+  // undo/redo をまたいで古い位置のまま残ってしまう。ここで一緒に消す
+  clearAddPreview();
   updateHistoryButtons();
   updateEditReadout();
 }
@@ -823,7 +826,15 @@ function csgOp(op, a, b) {
   a.updateMatrix();
   b.updateMatrix();
   const res = CSG[op](a, b);
-  return res.geometry.clone().applyMatrix4(res.matrix);
+  const geometry = res.geometry.clone().applyMatrix4(res.matrix);
+  // three-csg-ts は完全に重なる面など縮退した入力で例外を投げず空ジオメトリを返すことがある。
+  // 検知せずそのまま commitGeometry すると、エラーも出ないままモデルが消えたように見える。
+  const pos = geometry.getAttribute('position');
+  if (!pos || pos.count === 0) {
+    geometry.dispose();
+    throw new Error(t('err.csgEmpty'));
+  }
+  return geometry;
 }
 
 /**
@@ -877,9 +888,12 @@ async function subtractShape(mesh, note) {
   const pre = await preflight(triangleCount(targetMesh), t('op.subtract'));
   if (!pre.ok) { disposeMesh(mesh); return; }
   await withBusy(`${note}${pre.note ? ` (${pre.note})` : ''}`, () => {
-    const g = csgOp('subtract', targetMesh, mesh);
-    disposeMesh(mesh);
-    commitGeometry(g);
+    try {
+      const g = csgOp('subtract', targetMesh, mesh);
+      commitGeometry(g);
+    } finally {
+      disposeMesh(mesh);
+    }
   }, pre.heavy);
 }
 
@@ -896,9 +910,12 @@ async function unionShape(mesh, note) {
   const pre = await preflight(triangleCount(targetMesh), t('op.union'));
   if (!pre.ok) { disposeMesh(mesh); return; }
   await withBusy(`${note}${pre.note ? ` (${pre.note})` : ''}`, () => {
-    const g = csgOp('union', targetMesh, mesh);
-    disposeMesh(mesh);
-    commitGeometry(g);
+    try {
+      const g = csgOp('union', targetMesh, mesh);
+      commitGeometry(g);
+    } finally {
+      disposeMesh(mesh);
+    }
   }, pre.heavy);
 }
 

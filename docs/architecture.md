@@ -230,11 +230,28 @@ LLM は読み込んだ形状を見ていないため、指示できる範囲に�
   ジオメトリを直接シーンに渡すと、以後の編集で履歴が壊れるため)。
 - 入り口は ↶/↷ ボタンと Ctrl+Z / Ctrl+Y。キーハンドラは `e.target` が
   `textarea` / `input` のときは何もせず、ブラウザ標準のテキスト undo を邪魔しない。
+- `applyHistoryAt()` は `clearParts()` に加えて `clearAddPreview()` も呼ぶ(v0.16.2)。
+  結合前の図形/テキストのプレビュー(`previewMesh`)は `targetMesh` とは独立した状態を
+  持つため、これを呼ばないと undo/redo で `targetMesh` は変わってもプレビューだけ
+  古い位置・古い形のまま残り、ギズモも古い対象に付いたままになる。
 
 ### CSG 結果の座標系(`csgOp`)
 `three-csg-ts` の `toMesh` は**演算子 A のローカル空間**でジオメトリを返し、`mesh.matrix` に
 A の行列を入れて返す。行列を捨てると `targetMesh` が変換を持っていた場合に形がずれるため、
 `csgOp()` は必ず `res.geometry.clone().applyMatrix4(res.matrix)` で焼き込んでから返す。
+
+**縮退した結果(頂点 0 件)を検知して弾く(v0.16.2)。** `three-csg-ts` は面が完全に
+重なる/接するなど縮退した入力に対して、例外を投げずに**頂点数 0 のジオメトリ**を
+返すことがある(BSP 分割の性質上、面が丸ごと相殺されるケースがある)。実際に
+「テキストを結合 → Undo → 同じ位置のまま再度結合」のような、既に結合済みの形状と
+ほぼ同一の位置へもう一度結合する操作で再現した。これを検知せずに `commitGeometry()`
+すると**エラーは出ないまま `targetMesh` が空になり、モデルが消えたように見える**
+(かつ元のモデルの情報も失われる)。`csgOp()` の戻り値を作る際に
+`position` 属性の有無・頂点数 0 をチェックし、該当すれば `commitGeometry` を呼ぶ前に
+`err.csgEmpty` を投げるようにした。`unionShape()`/`subtractShape()` 側は
+`withBusy` の `try/finally` で一時メッシュ(`mesh`)の破棄を保証しつつ、例外は
+そのまま `showError()` へ伝播させる(**元の `targetMesh` は上書きされる前に例外が
+飛ぶので保持されたまま**)。
 
 ### パーツ分割(`splitConnectedComponents`)
 1. 頂点座標を `WELD_PRECISION` で量子化してキー化し、同一座標の頂点を溶接する
