@@ -96,18 +96,11 @@
         </div>
       </div>
 
-      <!-- 右上: 言語切替と、目的・機能仕様を説明する info ボタン -->
+      <!-- 右上: 言語切替と、使い方ガイド(別ページ)へのリンク -->
       <button id="btn-lang" class="lang-btn" type="button"
         data-i18n="lang.label" data-i18n-title="lang.title">EN</button>
-      <button id="btn-info" class="info-btn" type="button"
-        data-i18n-title="info.btnTitle" aria-haspopup="true" aria-expanded="false">i</button>
-      <div id="info-panel" class="hidden" role="dialog" aria-label="About Chat 3D">
-        <div class="info-head">
-          <span data-i18n="info.head">Chat 3D について</span>
-          <button id="btn-info-close" class="btn-x" type="button" data-i18n-title="common.close">×</button>
-        </div>
-        <div id="info-body" data-i18n-html="info.body"></div>
-      </div>
+      <a id="btn-guide" class="guide-btn" href="guide.html" target="_blank" rel="noopener noreferrer"
+        data-i18n-title="guide.btnTitle" aria-label="Chat 3D guide">?</a>
     </section>
 
     <!-- 右: 操作パネル -->
@@ -367,7 +360,7 @@
       sitesJsonPath: 'config/subutomo-sites.json',
       logoPath: './common/assets/logo.png',
       theme: 'dark-bg',
-      version: '0.13.0',
+      version: '0.14.0',
       privacy: { localStorage: true, analytics: false },
       onSecretAction: null
     };

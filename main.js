@@ -2583,25 +2583,6 @@ function initUI() {
   // エラーを閉じる
   document.getElementById('btn-error-close').addEventListener('click', clearError);
 
-  // 目的・機能仕様の info パネル開閉
-  const infoBtn = document.getElementById('btn-info');
-  const infoPanel = document.getElementById('info-panel');
-  const setInfoOpen = (open) => {
-    infoPanel.classList.toggle('hidden', !open);
-    infoBtn.setAttribute('aria-expanded', String(open));
-  };
-  infoBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    setInfoOpen(infoPanel.classList.contains('hidden'));
-  });
-  document.getElementById('btn-info-close').addEventListener('click', () => setInfoOpen(false));
-  document.addEventListener('click', (e) => {
-    if (!infoPanel.classList.contains('hidden') &&
-      !infoPanel.contains(e.target) && e.target !== infoBtn) {
-      setInfoOpen(false);
-    }
-  });
-
   // 設定タブ
   const apiKey = document.getElementById('api-key');
   const apiModel = document.getElementById('api-model');

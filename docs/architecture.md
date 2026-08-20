@@ -143,13 +143,13 @@ CSG を使わない（`geometry.translate/rotate/scale` を使う）ことを指
 これは実機での不具合報告(Bambu Studio で「三角形が多すぎる」警告 → スライサー側の
 簡略化で穴あき発生)を受けて追加した。CSG は結果の三角形数を増やす(A-1)ため、
 スライサー側が単純な間引きで簡略化すると水密性が壊れることがある。トーストと
-info パネルの「「三角形が多すぎる」と言われたら」節で、**簡略化を使わず、
+`guide.html`(使い方ガイド)の「「三角形が多すぎる」と言われたら」節で、**簡略化を使わず、
 そのままスライスできるなら何もしない**よう案内する。詳細は `docs/known-issues.md` の A-5。
 
 v0.9.1 で `makeWatertight()` が水密化まで面倒を見るようになったため、この文面から
 「スライサーの修復機能を先に試す」という案内は外した(保存した STL は既に水密で、
 Bambu Studio がエラーを出さないことを実測で確認済み)。修復に関する注意は
-info パネルの「それでも修復を促されたら」節へ降格してある。
+`guide.html` の「それでも修復を促されたら」節へ降格してある。
 
 ### 水密化(`makeWatertight`) — STL 保存時の T ジャンクション修復
 
@@ -358,7 +358,7 @@ Google は個別のモデル ID(`gemini-2.5-flash` 等)を新規ユーザー向�
 ### 文言の置き場所を 2 つに分けている
 | 置き場所 | 対象 | 理由 |
 | --- | --- | --- |
-| `i18n.js` の `JA` / `EN` 辞書 | **画面表示の文言**(ボタン・ラベル・トースト・エラー・info パネル) | 対訳が 1 対 1 で並ぶので抜けに気づける |
+| `i18n.js` の `JA` / `EN` 辞書 | **画面表示の文言**(ボタン・ラベル・トースト・エラー・`guide.html` 本文) | 対訳が 1 対 1 で並ぶので抜けに気づける |
 | `main.js` の `*_JA` / `*_EN` 定数 | **LLM に渡すもの**(`DEFAULT_SYSTEM_PROMPT` / `INSTRUCTION_TEMPLATES` / `INSTRUCTION_LIMITS` / `SAMPLE_CODE`) | 三角形数を抑えるルールの調整はプロンプトの本文と一緒に読めた方が速い(CLAUDE.md のルール) |
 
 `main.js` からは直に定数を参照せず、`defaultSystemPrompt()` / `sampleCode()` /
@@ -383,13 +383,35 @@ Google は個別のモデル ID(`gemini-2.5-flash` 等)を新規ユーザー向�
 **これが無いと言語を切り替えるたびに同じガイドがログへ積み上がる。**
 
 ### 注意点
-- `i18n.js` は `index.html` が `main.js` に付けた `?v=` を引き継いで**動的 import** する。
-  静的 `import` だと `?v=` が付かず、バージョンを上げても古い辞書がキャッシュから使われる。
+- `i18n.js` は `index.html` が `main.js` に、`guide.html` が `guide-init.js` に付けた
+  `?v=` を引き継いで**動的 import** する。静的 `import` だと `?v=` が付かず、
+  バージョンを上げても古い辞書がキャッシュから使われる。
 - 文言を追加するときは **ja と en の両方に必ず入れる**。片方だけだと `t()` が JA へ
   フォールバックし、英語 UI に日本語が混ざる。
 - `textContent` に入る値に `&amp;` のような HTML 実体参照を書かない(そのまま表示される)。
   実体参照が要るのは `data-i18n-html` の値だけ。
 - コールバックの仮引数に `t` を使わない(i18n の `t()` を隠す)。
+
+## 使い方ガイド(guide.html、v0.14.0)
+以前は `index.html` 右上の「i」ボタンから開く小さな info パネル(280px 幅・70vh 上限の
+ドロップダウン)だった。CSG・座標・水密化・三角形数対策・立体テキストなど内容が
+増え続け、小さなパネルに収まらなくなったため、別ページ `guide.html` に切り出した。
+
+- ボタンは `#btn-guide`(`.guide-btn`、「?」)。トグルではなく `<a href="guide.html"
+  target="_blank">` の**ただのリンク**なので、開閉状態を管理する JS が不要になった
+  (以前の `setInfoOpen()` / クリック外側判定は削除済み)。
+- `guide.html` は `main.js`(Three.js / CSG / 動的実行エンジン)を読み込まない。
+  作業中のシーンとは無関係な静的ページのため、3D 関連の依存を持ち込む理由がない。
+  文言の適用と言語切替だけを行う `guide-init.js` を読む。
+- `style.css` を共有する。ただし `html, body { overflow: hidden; height: 100% }` は
+  `#app` の固定ビューポート前提の指定なので、`guide.html` 側は `body.gp-page` で
+  上書きして通常の縦スクロール記事にしている。
+- 見出し・注記のクラス名は `.info-h` / `.info-note`(info パネル時代の名残)から
+  `.gp-h` / `.gp-note` に変更した。
+- 本文は 1 つの `data-i18n-html` キー(`gp.body`)にまとめている(info パネル時代と
+  同じ構成)。セクションを増やすときは `<p class="gp-h">見出し</p>` を追加するだけでよい。
+- 共有フッター/バッジ/favicon は `index.html` と同様に持たせる(CLAUDE.md の方針どおり、
+  単独ページでも Subutomo サイト群の一員として振る舞う)。
 
 ## Subutomo 共有 UI
 - 左下バッジ: `assets/subutomo-badge.js` + `SUBUTOMO_BADGE_CONFIG`（spctrl-site と同一挙動）。

@@ -1,0 +1,68 @@
+<!-- 使い方ガイド(index.html とは別の独立ページ)。info パネルの情報量が増えたため分離した。 -->
+<!-- 表示文言は data-i18n 属性でマークし、i18n.js が日本語/英語を流し込む(index.html と同じ仕組み)。 -->
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat 3D の使い方ガイド</title>
+  <meta name="description" content="Chat 3D の目的・CSG の説明・座標の読み方・立体テキストの追加方法・STL 保存時の水密化についてのガイドです。" />
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+  <link rel="apple-touch-icon" href="assets/favicon-180.png">
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="gp-page">
+  <div class="gp-wrap">
+    <div class="gp-header">
+      <a id="gp-back" class="btn btn-ghost" href="index.html" data-i18n="gp.back">← Chat 3D に戻る</a>
+      <button id="btn-lang" class="lang-btn" type="button"
+        data-i18n="lang.label" data-i18n-title="lang.title">EN</button>
+    </div>
+    <h1 data-i18n="gp.h1">使い方ガイド</h1>
+    <div class="gp-article" data-i18n-html="gp.body"></div>
+  </div>
+
+  <!-- ══ 統一フッター(spctrl-site 踏襲・ダークオーバーレイ)══ -->
+  <footer class="su-foot su-foot--overlay" data-lang="ja">
+    <div class="su-foot-right">
+      <span class="su-foot-support">
+        <a href="https://ko-fi.com/subutomo" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">☕ </span><span data-i18n="foot.tip">チップ</span></a>
+        <span class="su-foot-sep" aria-hidden="true" data-i18n="foot.sep">・</span>
+        <a href="https://github.com/sponsors/t-sumita" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">❤️ </span>Sponsors</a>
+      </span>
+      <a class="su-foot-feedback" href="https://docs.google.com/forms/d/e/1FAIpQLSf_thpSe4TfQ_EloElTBsCiMKgypYTKLCs0dSTmaF_FXZSvIg/viewform?usp=pp_url&entry.2036331541=Chat+3D+(chat-3d)" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">📣 </span><span data-i18n="foot.feedback">ご意見・ご要望</span></a>
+    </div>
+  </footer>
+
+  <!-- Subutomo サイト選択バッジ(spctrl-site と同一の共有フッター体験) -->
+  <script>
+    window.SUBUTOMO_BADGE_CONFIG = {
+      currentSiteId: 'chat-3d',
+      sitesJsonPath: 'config/subutomo-sites.json',
+      logoPath: './common/assets/logo.png',
+      theme: 'dark-bg',
+      version: '0.14.0',
+      privacy: { localStorage: true, analytics: false },
+      onSecretAction: null
+    };
+  </script>
+  <script>
+    (function () {
+      var v = (window.SUBUTOMO_BADGE_CONFIG && window.SUBUTOMO_BADGE_CONFIG.version) || '';
+      var q = v ? '?v=' + encodeURIComponent(v) : '';
+      var badge = document.createElement('script');
+      badge.src = './assets/subutomo-badge.js' + q;
+      document.head.appendChild(badge);
+      // i18n.js も index.html と同じ ?v= を付けて読み込む(index.html/main.js と
+      // 同じキャッシュバスティング・ルール。無いとバージョンを上げても
+      // 古い辞書がキャッシュから使われることがある)。
+      var i18n = document.createElement('script');
+      i18n.type = 'module';
+      i18n.src = './guide-init.js' + q;
+      document.head.appendChild(i18n);
+    }());
+  </script>
+</body>
+</html>

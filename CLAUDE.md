@@ -22,9 +22,13 @@ Subutomo Dev のツール系サイト群の一員として、共有フッター/
 
 ## ファイル構成
 - `index.html` — エントリ。UI 骨格 / importmap / フッター / バッジ。
+- `guide.html` / `guide-init.js` — 使い方ガイド(index.html の「?」ボタンから別タブで開く
+  独立ページ)。Three.js は読み込まず、`guide-init.js` が `i18n.js` を import して JA/EN を
+  切り替える。
 - `main.js` — 中核ロジック(Three.js / STL 入出力 / 動的実行エンジン / Gemini)。
-- `i18n.js` — UI 文言の日本語/英語辞書と、言語の検出・切替・DOM 反映。
-- `style.css` — レイアウトとダークテーマ。
+- `i18n.js` — UI 文言の日本語/英語辞書と、言語の検出・切替・DOM 反映。`index.html` と
+  `guide.html` の両方から import される。
+- `style.css` — レイアウトとダークテーマ(`guide.html` 用のページレイアウトも含む)。
 - `vendor/` — 上流ライブラリのバグ修正のためにローカルへ持ち込んだ改変版
   (現状: `3MFLoader.js`。ライセンス表記と改変理由をファイル冒頭コメントに残すこと)。
 - `assets/` — favicon 一式と `subutomo-badge.js`(spctrl-site から踏襲・複製)。

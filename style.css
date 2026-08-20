@@ -182,8 +182,8 @@ html, body {
   color: var(--muted);
 }
 
-/* 右上: 目的・機能仕様を説明する info ボタンとパネル */
-.info-btn {
+/* 右上: 使い方ガイド(別ページ)への導線ボタン */
+.guide-btn {
   position: absolute;
   top: 12px;
   right: 12px;
@@ -194,19 +194,18 @@ html, body {
   border: 1px solid var(--border);
   background: rgba(0, 0, 0, 0.5);
   color: var(--accent);
-  font-family: Georgia, "Times New Roman", serif;
-  font-style: italic;
   font-weight: 700;
   font-size: 13px;
   cursor: pointer;
+  text-decoration: none;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: background 0.15s, border-color 0.15s;
 }
-.info-btn:hover { border-color: var(--accent); background: rgba(0, 0, 0, 0.7); }
+.guide-btn:hover { border-color: var(--accent); background: rgba(0, 0, 0, 0.7); }
 
-/* 右上: 表示言語の切替(info ボタンの左隣に置く) */
+/* 右上: 表示言語の切替(ガイドボタンの左隣に置く) */
 .lang-btn {
   position: absolute;
   top: 12px;
@@ -226,30 +225,22 @@ html, body {
 }
 .lang-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(0, 0, 0, 0.7); }
 
-#info-panel {
-  position: absolute;
-  top: 46px;
-  right: 12px;
-  z-index: 6;
-  width: 280px;
-  max-height: 70vh;
-  overflow-y: auto;
-  background: rgba(18, 20, 28, 0.97);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px 14px;
-  font-size: 12.5px;
-  line-height: 1.6;
-  color: var(--text);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-}
-.info-head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; margin-bottom: 8px; }
-#info-panel p { margin: 0 0 8px; }
-#info-panel ul { margin: 0 0 8px; padding-left: 18px; }
-#info-panel li { margin-bottom: 4px; }
-#info-panel code { font-family: var(--mono); font-size: 11px; color: var(--accent); }
-.info-h { font-weight: 700; color: var(--accent); margin: 12px 0 5px !important; }
-.info-note { color: #ffd39b; font-size: 11.5px; }
+/* ── 使い方ガイドページ(guide.html)専用 ──
+   #app の固定ビューポート前提(html/body: overflow hidden)を外し、
+   通常の縦スクロール記事として表示する。 */
+body.gp-page { overflow-y: auto; height: auto; min-height: 100%; }
+.gp-wrap { max-width: 720px; margin: 0 auto; padding: 28px 20px 60px; }
+.gp-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.gp-header .lang-btn { position: static; }
+#gp-back { display: inline-block; text-decoration: none; }
+.gp-wrap h1 { font-size: 20px; margin: 0 0 18px; }
+.gp-article { font-size: 13.5px; line-height: 1.75; color: var(--text); }
+.gp-article p { margin: 0 0 10px; }
+.gp-article ul { margin: 0 0 10px; padding-left: 20px; }
+.gp-article li { margin-bottom: 5px; }
+.gp-article code { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+.gp-h { font-weight: 700; color: var(--accent); font-size: 15px; margin: 22px 0 7px !important; }
+.gp-note { color: #ffd39b; font-size: 12px; }
 
 /* ── 右下: 表示補助(グリッド/軸)と座標ピック ──
    左下は Subutomo バッジ、下中央はトーストが使うため右下に置く。 */
