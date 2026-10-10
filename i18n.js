@@ -99,7 +99,7 @@ const JA = {
       <li>例:「上面に "A1" という文字を、高さ 8mm・厚み 1mm で浮き彫りにして」</li>
       <li>使える文字は半角の英数字・記号のみです(日本語などは非対応)。</li>
       <li>浮き彫り(盛り上げる)か彫り込み(へこませる)かも、指示の言い回しで伝えられます。</li>
-      <li>チャットを使わない「編集」タブにも文字追加はありますが、そちらは中央配置・Y 位置のみの簡易版です。X/Z 位置や向きまで指定したいときはチャット指示を使ってください。</li>
+      <li>チャットを使わない「編集」タブにも文字追加はありますが、そちらは X/Y/Z の位置まで指定できます。向き(回転)を変えたいときはチャット指示を使ってください。</li>
     </ul>
 
     <h2 class="gp-h" id="sec-watertight">保存した STL はそのまま印刷できます</h2>
@@ -438,7 +438,7 @@ const EN = {
       <li>Example: “Emboss the text ‘A1’ on the top face, 8&nbsp;mm tall and 1&nbsp;mm deep.”</li>
       <li>Only ASCII letters, digits and punctuation are supported (no Japanese or other non-Latin scripts).</li>
       <li>Whether it is embossed (raised) or engraved (recessed) is also up to how you phrase the instruction.</li>
-      <li>The chat-free “Edit” tab can also add text, but only centred with a Y position. Use a chat instruction if you need X/Z position or rotation.</li>
+      <li>The chat-free “Edit” tab can also add text, and lets you set its X/Y/Z position. Use a chat instruction if you need to rotate it.</li>
     </ul>
 
     <h2 class="gp-h" id="sec-watertight">Saved STL files are ready to print</h2>
