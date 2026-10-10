@@ -84,8 +84,8 @@ const JA = {
     <p>Chat 3D は、AI(LLM)が書いた<b>JavaScript のコード</b>をブラウザ内で実行して、形を作るツールです。コードは Three.js で書かれ、形は<b>三角形の集まり(メッシュ)</b>として扱われます。穴あけ・結合などは、メッシュ同士の演算(CSG)で行います。</p>
     <p>姉妹ツールの <a href="https://chat-cad.subutomo.dev" target="_blank" rel="noopener">Chat CAD</a> も「AI が書いたコードを実行する」点は同じです。違いは次のとおりです。</p>
     <ul>
-      <li><b>Chat CAD は上位版です。</b>形を数式で表す CAD 形状(Replicad / OpenCASCADE)で扱い、スライダーで寸法をあとから調整できて、STEP / 3MF / STL を出力できます。本格的に設計するならこちらです。開発中の読み込みモードでは、STEP / STL / 3MF を読み込んで拡大縮小や平面での分割もできるようになります(STL / 3MF は表示のみで、加工できるのは STEP です)。分割は Chat CAD のほうがきれいにできる見込みです。</li>
-      <li><b>Chat 3D はシンプルで、直接編集ができます。</b>機能を絞った分、手軽に試せます。既存の STL / 3MF を読み込み、消しゴム・パーツ分割・拡大縮小・図形や文字の追加で編集できます。消しゴムは Chat 3D だけの機能です。出力は STL です。</li>
+      <li><b>Chat CAD は上位版です。</b>形を数式で表す CAD 形状(Replicad / OpenCASCADE)で扱い、スライダーで寸法をあとから調整できて、STEP / 3MF / STL を出力できます。本格的に設計するならこちらです。開発中の読み込みモードでは、STEP / STL / 3MF を読み込めるようになります(STL / 3MF は表示のみ)。STEP なら、拡大縮小や平面での切断もできる見込みです。</li>
+      <li><b>Chat 3D はシンプルで、直接編集ができます。</b>機能を絞った分、手軽に試せます。既存の STL / 3MF を読み込み、消しゴム・拡大縮小・図形や文字の追加で編集できます。消しゴムは Chat 3D だけの機能です。出力は STL です。</li>
       <li><b>API モードは Chat 3D だけです。</b>Gemini API を直接呼び出して、コピペなしで進められます。Chat CAD はコピペのみです。</li>
     </ul>
 
@@ -432,8 +432,8 @@ const EN = {
     <p>Chat 3D runs <b>JavaScript code</b> written by an AI (LLM) inside your browser to build a shape. The code uses Three.js, and the shape is handled as a <b>mesh — a collection of triangles</b>. Drilling holes, merging parts and the like are done with operations between meshes (CSG).</p>
     <p>Its sister tool <a href="https://chat-cad.subutomo.dev" target="_blank" rel="noopener">Chat CAD</a> also runs AI-written code. The differences are:</p>
     <ul>
-      <li><b>Chat CAD is the more advanced version.</b> It works with true CAD geometry described by equations (Replicad / OpenCASCADE), lets you adjust dimensions afterwards with sliders, and exports STEP / 3MF / STL. Choose it for serious design work. An import mode now in development will load STEP / STL / 3MF and support scaling and plane cutting (STL / 3MF are view-only; only STEP can be edited). Cutting parts should come out cleaner in Chat CAD.</li>
-      <li><b>Chat 3D is the simple one, with direct editing.</b> With fewer features, it is quick to try. It can load existing STL / 3MF files and edit them with the eraser, part splitting, scaling, and added shapes or text. The eraser exists only in Chat 3D. It exports STL.</li>
+      <li><b>Chat CAD is the more advanced version.</b> It works with true CAD geometry described by equations (Replicad / OpenCASCADE), lets you adjust dimensions afterwards with sliders, and exports STEP / 3MF / STL. Choose it for serious design work. An import mode now in development will load STEP / STL / 3MF (STL / 3MF are view-only). For STEP, scaling and plane cutting are expected as well.</li>
+      <li><b>Chat 3D is the simple one, with direct editing.</b> With fewer features, it is quick to try. It can load existing STL / 3MF files and edit them with the eraser, scaling, and added shapes or text. The eraser exists only in Chat 3D. It exports STL.</li>
       <li><b>API mode is only in Chat 3D.</b> It calls the Gemini API directly, so you can work without copy-and-paste. Chat CAD is copy-and-paste only.</li>
     </ul>
 
