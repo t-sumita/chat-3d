@@ -80,6 +80,15 @@ const JA = {
       <li><b>コード直接入力</b> — 外部 LLM で作った JavaScript を貼り付けて実行。</li>
     </ul>
 
+    <h2 class="gp-h" id="sec-mech">仕組み ― Chat CAD との違い</h2>
+    <p>Chat 3D は、AI(LLM)が書いた<b>JavaScript のコード</b>をブラウザ内で実行して、形を作るツールです。コードは Three.js で書かれ、形は<b>三角形の集まり(メッシュ)</b>として扱われます。穴あけ・結合などは、メッシュ同士の演算(CSG)で行います。</p>
+    <p>姉妹ツールの <a href="https://chat-cad.subutomo.dev" target="_blank" rel="noopener">Chat CAD</a> も「AI が書いたコードを実行する」点は同じです。違いは次のとおりです。</p>
+    <ul>
+      <li><b>Chat CAD は上位版です。</b>形を数式で表す CAD 形状(Replicad / OpenCASCADE)で扱い、スライダーで寸法をあとから調整できて、STEP / 3MF / STL を出力できます。本格的に設計するならこちらです。</li>
+      <li><b>Chat 3D はシンプルです。</b>機能を絞った分、手軽に試せます。既存の STL / 3MF を読み込んで加工でき、出力は STL です。</li>
+      <li><b>API モードは Chat 3D だけです。</b>Gemini API を直接呼び出して、コピペなしで進められます。Chat CAD はコピペのみです。</li>
+    </ul>
+
     <h2 class="gp-h" id="sec-csg">CSG とは?</h2>
     <p>立体どうしを<b>「足す・引く・重なりを取る」</b>演算のことです。たとえば立方体から円柱を「引く」と、そこに穴が開きます。3D プリンタ用のモデルを組み立てるときの、いちばん基本になる操作です。</p>
     <ul>
@@ -417,6 +426,15 @@ const EN = {
       <li><b>Generate from scratch</b> — start from an empty scene and build with primitives + CSG using chat alone.</li>
       <li><b>Edit tab</b> — no chat needed: scale, erase, split into parts, add shapes and text using the mouse and numeric fields.</li>
       <li><b>Paste code</b> — run JavaScript you produced with any external LLM.</li>
+    </ul>
+
+    <h2 class="gp-h" id="sec-mech">How it works — and how it differs from Chat CAD</h2>
+    <p>Chat 3D runs <b>JavaScript code</b> written by an AI (LLM) inside your browser to build a shape. The code uses Three.js, and the shape is handled as a <b>mesh — a collection of triangles</b>. Drilling holes, merging parts and the like are done with operations between meshes (CSG).</p>
+    <p>Its sister tool <a href="https://chat-cad.subutomo.dev" target="_blank" rel="noopener">Chat CAD</a> also runs AI-written code. The differences are:</p>
+    <ul>
+      <li><b>Chat CAD is the more advanced version.</b> It works with true CAD geometry described by equations (Replicad / OpenCASCADE), lets you adjust dimensions afterwards with sliders, and exports STEP / 3MF / STL. Choose it for serious design work.</li>
+      <li><b>Chat 3D is the simple one.</b> With fewer features, it is quick to try. It can load and edit existing STL / 3MF files, and exports STL.</li>
+      <li><b>API mode is only in Chat 3D.</b> It calls the Gemini API directly, so you can work without copy-and-paste. Chat CAD is copy-and-paste only.</li>
     </ul>
 
     <h2 class="gp-h" id="sec-csg">What is CSG?</h2>
