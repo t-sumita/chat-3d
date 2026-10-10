@@ -74,7 +74,7 @@ const JA = {
   'gp.body': `
     <p>ブラウザだけで完結する、テキスト指示 / コード実行による 3D モデル(STL)生成・編集ツールの PoC です。バックエンドは持ちません。</p>
     <ul>
-      <li><b>STL 編集</b> — STL を Drag&amp;Drop で読み込み、チャット指示で CSG 加工(穴あけ・結合など)。</li>
+      <li><b>STL 編集</b> — STL(3MF も読み込み可。形状のみで色は無視され、保存は STL)を Drag&amp;Drop で読み込み、チャット指示で CSG 加工(穴あけ・結合など)。</li>
       <li><b>ゼロベース生成</b> — 何も読み込まずチャット指示だけで基本図形 + CSG から生成。</li>
       <li><b>編集</b> — チャットを使わず、拡大縮小・消しゴム・パーツ分割・図形/文字の追加をマウスと数値で直接操作。</li>
       <li><b>コード直接入力</b> — 外部 LLM で作った JavaScript を貼り付けて実行。</li>
@@ -413,7 +413,7 @@ const EN = {
   'gp.body': `
     <p>A browser-only proof of concept for generating and editing 3D models (STL) from text instructions or executable code. There is no backend.</p>
     <ul>
-      <li><b>Edit an STL</b> — drag &amp; drop an STL, then reshape it with CSG through chat instructions (drill holes, merge parts, …).</li>
+      <li><b>Edit an STL</b> — drag &amp; drop an STL (3MF can also be loaded; only the shape is used, colors are ignored, and saving is STL only), then reshape it with CSG through chat instructions (drill holes, merge parts, …).</li>
       <li><b>Generate from scratch</b> — start from an empty scene and build with primitives + CSG using chat alone.</li>
       <li><b>Edit tab</b> — no chat needed: scale, erase, split into parts, add shapes and text using the mouse and numeric fields.</li>
       <li><b>Paste code</b> — run JavaScript you produced with any external LLM.</li>
